@@ -20,8 +20,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      # The runner is several times slower than a dev Mac: test/tidy.test.ts takes 2-5 s per test there,
-      # and one passed vitest's 5 s default.
+      # The slowest tests take about 2.5 times as long on the runner as on a dev Mac (4.7 s against 1.8 s),
+      # and one in test/tidy.test.ts passed vitest's 5 s default.
       - run: npm test -- --testTimeout=30000
 
   desktop:
