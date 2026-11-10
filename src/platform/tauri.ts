@@ -8,7 +8,9 @@ import { check } from '@tauri-apps/plugin-updater';
 import { boardKind, readBoard, readSerial } from '../model/load';
 import { boot, flushBeforeClose, useStore } from '../model/store';
 import { upgradePreset } from '../model/video';
-import { isCatcher } from '../ui/keys';
+import { inGesture } from '../canvas/Canvas';
+import { boardBeside } from '../ui/BoardTabs';
+import { composing, isCatcher, tabStep } from '../ui/keys';
 import type { Doc, UserPreset } from '../model/types';
 import { type Platform, shortcuts, usePlatform } from './io';
 import { type Backend, type BoardInfo, type BoardNews, Conflict, Gone, type TrashedBoard, WRITER, assetOf } from './storage';
@@ -274,6 +276,32 @@ export async function startDesktop(): Promise<void> {
         t instanceof HTMLElement && !isCatcher(t) && (t.isContentEditable || /^(INPUT|TEXTAREA)$/.test(t.tagName));
       if (!editable && !window.getSelection()?.toString()) e.preventDefault();
     });
+  // ⌘⇧] / ⌘⇧[ (Ctrl+Shift on Windows): the project's next or previous board, as a click on its tab
+  // (not in a browser, whose own tabs these keys are). Heard first, so that they work while typing
+  // too.
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      const step = tabStep(e);
+      // What the board's keys wait for too: the IME's conversion (on the field that takes its typing
+      // on a selected shape, told by keyCode 229 alone, as in App), a drag (on the board, or of a row
+      // in the lists, which would land on the board opened meanwhile), a window or the project menu
+      // over the board.
+      const ime = isCatcher(e.target) ? e.keyCode === 229 : composing(e);
+      if (!step || ime || inGesture() || document.body.classList.contains('row-dragging') || document.querySelector('.modal-bg, .project-menu')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!boardBeside(useStore.getState().doc, useStore.getState().boards, step)) return;
+      // Leaving the field takes what is typed there, as the click does; the tabs are then taken as
+      // they are (a project name just typed puts the board among other tabs).
+      const field = document.activeElement;
+      if (field instanceof HTMLElement && !isCatcher(field) && (field.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(field.tagName))) field.blur();
+      const s = useStore.getState();
+      const to = boardBeside(s.doc, s.boards, step);
+      if (to) s.openBoard(to);
+    },
+    true,
+  );
   // keito > アップデートを確認…
   void listen('check-update', () => void lookForUpdate(true));
   try {
