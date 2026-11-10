@@ -1,14 +1,24 @@
 import { vi } from 'vitest';
 import { Conflict, Gone } from '../src/platform/storage';
-import type { Backend } from '../src/platform/storage';
+import type { Backend, BoardNews } from '../src/platform/storage';
 import type { Doc } from '../src/model/types';
 
 /** The store runs in a page: give it just enough of one. Returns the page's event listeners. */
 export function stubPage(): { listeners: Record<string, (e?: unknown) => void>; storage: Map<string, string> } {
   const listeners: Record<string, (e?: unknown) => void> = {};
+  const handlers = new Map<string, Set<(e?: unknown) => void>>();
   const storage = new Map<string, string>();
   vi.useFakeTimers();
-  vi.stubGlobal('window', { setTimeout, clearTimeout, addEventListener: (k: string, f: () => void) => (listeners[k] = f), alert: () => {}, confirm: () => true });
+  vi.stubGlobal('window', {
+    setTimeout, clearTimeout,
+    addEventListener: (k: string, f: (e?: unknown) => void) => {
+      if (!handlers.has(k)) handlers.set(k, new Set());
+      handlers.get(k)!.add(f);
+      listeners[k] = (e) => handlers.get(k)?.forEach((hear) => hear(e));
+    },
+    removeEventListener: (k: string, f: (e?: unknown) => void) => handlers.get(k)?.delete(f),
+    alert: () => {}, confirm: () => true,
+  });
   vi.stubGlobal('document', { getElementById: () => null, addEventListener: () => {}, visibilityState: 'visible' });
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) });
   vi.stubGlobal('location', { hash: '', pathname: '/', search: '' });
@@ -24,14 +34,17 @@ export function stubPage(): { listeners: Record<string, (e?: unknown) => void>; 
 export function versionedDisk(boards: Doc[]) {
   const kept = new Map<string, { doc: Doc; serial: number }>(boards.map((d) => [d.id, { doc: d, serial: 1 }]));
   const known = new Map<string, number>();
-  const box = { kept, delay: 0 };
+  const watchers = new Set<(news: BoardNews) => void>();
+  const box = { kept, delay: 0, notify: (news: BoardNews) => watchers.forEach((hear) => hear(news)) };
   const backend: Backend = {
     mode: 'server',
+    writer: Math.random().toString(36).slice(2, 12),
     assets: false,
+    watch: (hear) => { watchers.add(hear); return () => { watchers.delete(hear); }; },
     assetUrl: (_, src) => src,
     fitsExitSave: () => true,
     exitSave: () => {},
-    list: async () => [...kept.values()].map(({ doc }) => ({ id: doc.id, title: doc.meta.title, updated: 0 })),
+    list: async () => [...kept.values()].map(({ doc }) => ({ id: doc.id, title: doc.meta.title, project: doc.meta.project, updated: 0 })),
     load: async (id) => {
       if (box.delay) await new Promise((r) => setTimeout(r, box.delay));
       const k = kept.get(id);

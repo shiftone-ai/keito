@@ -22,6 +22,7 @@ export function Field({ label, value, onChange, multiline, wrap, type = 'text', 
       if (onPasteText?.(e.clipboardData.getData('text/plain'))) e.preventDefault();
     },
     onFocus: () => (dirty.current = false),
+    onBlur: () => useStore.getState().commitOperation(),
     onChange: (e: { target: { value: string } }) => {
       if (!dirty.current) {
         dirty.current = true;
@@ -123,7 +124,10 @@ export function CategoryField({ id, value, onChange, soft }: { id: string; value
             setHi(-1);
           }}
           onClick={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
+          onBlur={() => {
+            useStore.getState().commitOperation();
+            setOpen(false);
+          }}
           onChange={(e) => {
             if (!dirty.current) {
               dirty.current = true;
@@ -250,6 +254,7 @@ export function PortName({ value, onChange }: { value: string; onChange: (v: str
     <input
       value={value}
       onFocus={() => (dirty.current = false)}
+      onBlur={() => useStore.getState().commitOperation()}
       onChange={(e) => {
         if (!dirty.current) {
           dirty.current = true;
