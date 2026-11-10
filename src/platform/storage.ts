@@ -280,94 +280,97 @@ async function ok(res: Response): Promise<Response> {
   return res;
 }
 
-// The version of each board on disk as this page last read or wrote it.
-const serials = new Map<string, number>();
+/** One connection's identity, used to ignore its own change notifications. */
+export const newWriter = (): string => Math.random().toString(36).slice(2, 12);
 
-/** This page, as the writer of the boards it saves: news of its own writes is not news to it. */
-export const WRITER = Math.random().toString(36).slice(2, 12);
-
-const server: Backend = {
-  mode: 'server',
-  assets: true,
-  watch(news) {
-    if (typeof EventSource === 'undefined') return () => {};
-    const events = new EventSource('/api/events');
-    events.onmessage = (m) => {
-      try {
-        news(JSON.parse(m.data));
-      } catch {
-        // Not news.
-      }
-    };
-    return () => events.close();
-  },
-  assetUrl: (boardId, src) => (src.startsWith('asset:') ? `${API}/${boardId}/assets/${src.slice(6)}` : src),
-  fitsExitSave: (doc) => bytes(JSON.stringify(doc)) <= KEEPALIVE_LIMIT,
-  exitSave(doc) {
-    // keepalive lets the request outlive the page; made on the version this page read, so never
-    // over a change made elsewhere meanwhile.
-    const body = JSON.stringify(doc);
-    if (bytes(body) > KEEPALIVE_LIMIT) return;
-    const serial = serials.get(doc.id);
-    const headers = { 'Content-Type': 'application/json', 'X-Keito-Writer': WRITER, 'If-Match': serial === undefined ? '*' : String(serial) };
-    void fetch(`${API}/${doc.id}`, { method: 'PUT', keepalive: true, headers, body }).catch(() => {});
-  },
-  list: async () => ((await (await ok(await fetch(API))).json()) as BoardInfo[]).map((b) => ({ ...b, kind: boardKind(b.kind) })),
-  load: async (id) => {
-    const res = await fetch(`${API}/${id}`);
-    if (res.status === 404) return null;
-    const raw = await (await ok(res)).json();
-    serials.set(id, readSerial(raw?.serial));
-    return clean(raw);
-  },
-  save: async (doc, force) => {
-    const known = serials.get(doc.id);
-    const res = await fetch(`${API}/${doc.id}`, {
-      method: 'PUT',
-      // Written on the version read; a board never read here (just made) has nothing to check.
-      headers: { 'Content-Type': 'application/json', 'X-Keito-Writer': WRITER, ...(force || known === undefined ? { 'If-Match': '*' } : { 'If-Match': String(known) }) },
-      body: JSON.stringify(doc),
-    });
-    if (res.status === 409) throw new Conflict(readSerial((await res.json()).serial));
-    if (res.status === 410) throw new Gone();
-    const done = await (await ok(res)).json();
-    if (typeof done?.serial === 'number') serials.set(doc.id, done.serial);
-  },
-  serialOf: (id) => serials.get(id),
-  remove: async (id) => {
-    await ok(await fetch(`${API}/${id}`, { method: 'DELETE' }));
-  },
-  trash: async () => ((await (await ok(await fetch('/api/trash'))).json()) as TrashedBoard[]).map((t) => ({ ...t, kind: boardKind(t.kind) })),
-  restore: async (k) => {
-    const res = await fetch(`/api/trash/${encodeURIComponent(k)}`, { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body?.error || `戻せませんでした (${res.status})`);
-    return String(body.id);
-  },
-  putAsset: async (boardId, dataUrl) => {
-    const picture = await assetOf(dataUrl);
-    if (!picture) return dataUrl;
-    await ok(await fetch(`${API}/${boardId}/assets/${picture.name}`, { method: 'PUT', body: picture.blob }));
-    return `asset:${picture.name}`;
-  },
-  saveRevision: async (boardId, id, doc) => {
-    await ok(await fetch(`${API}/${boardId}/revisions/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) }));
-  },
-  loadRevision: async (boardId, id) => {
-    const res = await fetch(`${API}/${boardId}/revisions/${id}`);
-    return res.status === 404 ? null : clean(await (await ok(res)).json());
-  },
-  removeRevision: async (boardId, id) => {
-    await ok(await fetch(`${API}/${boardId}/revisions/${id}`, { method: 'DELETE' }));
-  },
-  loadPresets: async () => {
-    const v = await (await ok(await fetch('/api/presets'))).json();
-    return Array.isArray(v) ? v.map(upgradePreset) : [];
-  },
-  savePresets: async (list) => {
-    await ok(await fetch('/api/presets', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(list) }));
-  },
-};
+/** Each connection remembers only the versions it read and wrote. */
+function serverBackend(): Backend {
+  const serials = new Map<string, number>();
+  const writer = newWriter();
+  return {
+    mode: 'server',
+    assets: true,
+    watch(news) {
+      if (typeof EventSource === 'undefined') return () => {};
+      const events = new EventSource('/api/events');
+      events.onmessage = (m) => {
+        try {
+          const change: BoardNews = JSON.parse(m.data);
+          if (change.writer !== writer) news(change);
+        } catch {
+          // Not news.
+        }
+      };
+      return () => events.close();
+    },
+    assetUrl: (boardId, src) => (src.startsWith('asset:') ? `${API}/${boardId}/assets/${src.slice(6)}` : src),
+    fitsExitSave: (doc) => bytes(JSON.stringify(doc)) <= KEEPALIVE_LIMIT,
+    exitSave(doc) {
+      // keepalive lets the request outlive the page; made on the version this page read, so never
+      // over a change made elsewhere meanwhile.
+      const body = JSON.stringify(doc);
+      if (bytes(body) > KEEPALIVE_LIMIT) return;
+      const serial = serials.get(doc.id);
+      const headers = { 'Content-Type': 'application/json', 'X-Keito-Writer': writer, 'If-Match': serial === undefined ? '*' : String(serial) };
+      void fetch(`${API}/${doc.id}`, { method: 'PUT', keepalive: true, headers, body }).catch(() => {});
+    },
+    list: async () => ((await (await ok(await fetch(API))).json()) as BoardInfo[]).map((b) => ({ ...b, kind: boardKind(b.kind) })),
+    load: async (id) => {
+      const res = await fetch(`${API}/${id}`);
+      if (res.status === 404) return null;
+      const raw = await (await ok(res)).json();
+      serials.set(id, readSerial(raw?.serial));
+      return clean(raw);
+    },
+    save: async (doc, force) => {
+      const known = serials.get(doc.id);
+      const res = await fetch(`${API}/${doc.id}`, {
+        method: 'PUT',
+        // Written on the version read; a board never read here (just made) has nothing to check.
+        headers: { 'Content-Type': 'application/json', 'X-Keito-Writer': writer, ...(force || known === undefined ? { 'If-Match': '*' } : { 'If-Match': String(known) }) },
+        body: JSON.stringify(doc),
+      });
+      if (res.status === 409) throw new Conflict(readSerial((await res.json()).serial));
+      if (res.status === 410) throw new Gone();
+      const done = await (await ok(res)).json();
+      if (typeof done?.serial === 'number') serials.set(doc.id, done.serial);
+    },
+    serialOf: (id) => serials.get(id),
+    remove: async (id) => {
+      await ok(await fetch(`${API}/${id}`, { method: 'DELETE' }));
+    },
+    trash: async () => ((await (await ok(await fetch('/api/trash'))).json()) as TrashedBoard[]).map((t) => ({ ...t, kind: boardKind(t.kind) })),
+    restore: async (k) => {
+      const res = await fetch(`/api/trash/${encodeURIComponent(k)}`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || `戻せませんでした (${res.status})`);
+      return String(body.id);
+    },
+    putAsset: async (boardId, dataUrl) => {
+      const picture = await assetOf(dataUrl);
+      if (!picture) return dataUrl;
+      await ok(await fetch(`${API}/${boardId}/assets/${picture.name}`, { method: 'PUT', body: picture.blob }));
+      return `asset:${picture.name}`;
+    },
+    saveRevision: async (boardId, id, doc) => {
+      await ok(await fetch(`${API}/${boardId}/revisions/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) }));
+    },
+    loadRevision: async (boardId, id) => {
+      const res = await fetch(`${API}/${boardId}/revisions/${id}`);
+      return res.status === 404 ? null : clean(await (await ok(res)).json());
+    },
+    removeRevision: async (boardId, id) => {
+      await ok(await fetch(`${API}/${boardId}/revisions/${id}`, { method: 'DELETE' }));
+    },
+    loadPresets: async () => {
+      const v = await (await ok(await fetch('/api/presets'))).json();
+      return Array.isArray(v) ? v.map(upgradePreset) : [];
+    },
+    savePresets: async (list) => {
+      await ok(await fetch('/api/presets', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(list) }));
+    },
+  };
+}
 
 /** The store in use, once connected: pictures are shown through it. */
 let current: Backend | null = null;
@@ -381,16 +384,17 @@ const KEEPALIVE_LIMIT = 60_000;
  * Use the store handed in (the desktop app's), else the on-disk store when the keito server
  * answers, else the browser's own.
  */
-export async function connect(given?: Backend): Promise<Backend> {
-  current = given ?? (await reach());
-  return current;
+export async function connect(given?: Backend, activate = true): Promise<Backend> {
+  const backend = given ?? (await reach());
+  if (activate) current = backend;
+  return backend;
 }
 
 async function reach(): Promise<Backend> {
   if (new URLSearchParams(location.search).has('local')) return local;
   try {
     const res = await fetch(API);
-    if (res.ok && Array.isArray(await res.json())) return server;
+    if (res.ok && Array.isArray(await res.json())) return serverBackend();
   } catch {
     // No server (static build / file://): fall through.
   }

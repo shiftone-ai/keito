@@ -12,7 +12,7 @@ import { isCatcher } from '../ui/keys';
 import { listenTabKeys } from '../ui/tabKeys';
 import type { Doc, UserPreset } from '../model/types';
 import { type Platform, shortcuts, usePlatform } from './io';
-import { type Backend, type BoardInfo, type BoardNews, Conflict, Gone, type TrashedBoard, WRITER, assetOf } from './storage';
+import { type Backend, type BoardInfo, type BoardNews, Conflict, Gone, type TrashedBoard, assetOf, newWriter } from './storage';
 import { offerUpdate, startUpdate } from './update';
 
 /**
@@ -25,9 +25,6 @@ const WINDOWS = navigator.userAgent.includes('Windows');
 /** Pictures in a board's folder, as the app serves them (Windows reaches custom schemes over http). */
 const ASSETS = WINDOWS ? 'http://keito-asset.localhost/' : 'keito-asset://localhost/';
 
-// The version of each board on disk as this page last read or wrote it.
-const serials = new Map<string, number>();
-
 /** A refusal from the app's write, as the page's own errors. */
 function refusal(e: unknown): Error {
   const said = String(e);
@@ -36,69 +33,77 @@ function refusal(e: unknown): Error {
   return new Error(said);
 }
 
-const desktop: Backend = {
-  // Boards are kept in files on this machine, as with the dev server.
-  mode: 'server',
-  assets: true,
-  list: async () => (await invoke<BoardInfo[]>('list_boards')).map((b) => ({ ...b, kind: boardKind(b.kind) })),
-  load: async (id) => {
-    const text = await invoke<string | null>('load_board', { id });
-    if (text == null) return null;
-    const raw = JSON.parse(text);
-    serials.set(id, readSerial(raw?.serial));
-    return readBoard(raw);
-  },
-  save: async (doc, force) => {
-    const known = serials.get(doc.id);
-    try {
-      // Written on the version read; a board never read here (just made) has nothing to check.
-      const done = await invoke<{ serial: number }>('save_board', { doc, base: force || known === undefined ? null : known, writer: WRITER });
-      serials.set(doc.id, done.serial);
-    } catch (e) {
-      throw refusal(e);
-    }
-  },
-  serialOf: (id) => serials.get(id),
-  remove: (id) => invoke('remove_board', { id }),
-  trash: async () => (await invoke<TrashedBoard[]>('trashed_boards')).map((t) => ({ ...t, kind: boardKind(t.kind) })),
-  restore: async (key) => {
-    try {
-      return await invoke<string>('restore_board', { key });
-    } catch (e) {
-      throw new Error(String(e));
-    }
-  },
-  putAsset: async (boardId, dataUrl) => {
-    const picture = await assetOf(dataUrl);
-    if (!picture) return dataUrl;
-    await invoke('put_asset', new Uint8Array(await picture.blob.arrayBuffer()), { headers: { board: boardId, name: picture.name } });
-    return `asset:${picture.name}`;
-  },
-  saveRevision: (board, id, doc) => invoke('save_revision', { board, id, doc }),
-  loadRevision: async (board, id) => {
-    const text = await invoke<string | null>('load_revision', { board, id });
-    return text == null ? null : readBoard(JSON.parse(text));
-  },
-  removeRevision: (board, id) => invoke('remove_revision', { board, id }),
-  loadPresets: async () => {
-    const v = JSON.parse(await invoke<string>('load_presets'));
-    return Array.isArray(v) ? (v as UserPreset[]).map(upgradePreset) : [];
-  },
-  savePresets: (list) => invoke('save_presets', { list }),
-  watch: (news) => {
-    let stop: (() => void) | null = null;
-    let stopped = false;
-    void listen<BoardNews>('board-changed', (e) => news(e.payload)).then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
-    return () => {
-      stopped = true;
-      stop?.();
-    };
-  },
-  assetUrl: (boardId, src) => (src.startsWith('asset:') ? `${ASSETS}${boardId}/${src.slice('asset:'.length)}` : src),
-  // The window waits for the last write as it closes (see below), so nothing is left to the last moment.
-  fitsExitSave: () => true,
-  exitSave: (doc: Doc) => void desktop.save(doc).catch(() => {}),
-};
+/** Each desktop connection remembers only the versions it read and wrote. */
+function desktopBackend(): Backend {
+  const serials = new Map<string, number>();
+  const writer = newWriter();
+  const desktop: Backend = {
+    // Boards are kept in files on this machine, as with the dev server.
+    mode: 'server',
+    assets: true,
+    list: async () => (await invoke<BoardInfo[]>('list_boards')).map((b) => ({ ...b, kind: boardKind(b.kind) })),
+    load: async (id) => {
+      const text = await invoke<string | null>('load_board', { id });
+      if (text == null) return null;
+      const raw = JSON.parse(text);
+      serials.set(id, readSerial(raw?.serial));
+      return readBoard(raw);
+    },
+    save: async (doc, force) => {
+      const known = serials.get(doc.id);
+      try {
+        // Written on the version read; a board never read here (just made) has nothing to check.
+        const done = await invoke<{ serial: number }>('save_board', { doc, base: force || known === undefined ? null : known, writer });
+        serials.set(doc.id, done.serial);
+      } catch (e) {
+        throw refusal(e);
+      }
+    },
+    serialOf: (id) => serials.get(id),
+    remove: (id) => invoke('remove_board', { id }),
+    trash: async () => (await invoke<TrashedBoard[]>('trashed_boards')).map((t) => ({ ...t, kind: boardKind(t.kind) })),
+    restore: async (key) => {
+      try {
+        return await invoke<string>('restore_board', { key });
+      } catch (e) {
+        throw new Error(String(e));
+      }
+    },
+    putAsset: async (boardId, dataUrl) => {
+      const picture = await assetOf(dataUrl);
+      if (!picture) return dataUrl;
+      await invoke('put_asset', new Uint8Array(await picture.blob.arrayBuffer()), { headers: { board: boardId, name: picture.name } });
+      return `asset:${picture.name}`;
+    },
+    saveRevision: (board, id, doc) => invoke('save_revision', { board, id, doc }),
+    loadRevision: async (board, id) => {
+      const text = await invoke<string | null>('load_revision', { board, id });
+      return text == null ? null : readBoard(JSON.parse(text));
+    },
+    removeRevision: (board, id) => invoke('remove_revision', { board, id }),
+    loadPresets: async () => {
+      const v = JSON.parse(await invoke<string>('load_presets'));
+      return Array.isArray(v) ? (v as UserPreset[]).map(upgradePreset) : [];
+    },
+    savePresets: (list) => invoke('save_presets', { list }),
+    watch: (news) => {
+      let stop: (() => void) | null = null;
+      let stopped = false;
+      void listen<BoardNews>('board-changed', (e) => {
+        if (e.payload.writer !== writer) news(e.payload);
+      }).then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+      return () => {
+        stopped = true;
+        stop?.();
+      };
+    },
+    assetUrl: (boardId, src) => (src.startsWith('asset:') ? `${ASSETS}${boardId}/${src.slice('asset:'.length)}` : src),
+    // The window waits for the last write as it closes (see below), so nothing is left to the last moment.
+    fitsExitSave: () => true,
+    exitSave: (doc: Doc) => void desktop.save(doc).catch(() => {}),
+  };
+  return desktop;
+}
 
 /** The kinds of file a picker shows, from an <input accept> list (".xlsx,.json" or "image/*"). */
 function filters(accept: string): { name: string; extensions: string[] }[] {
@@ -280,7 +285,7 @@ export async function startDesktop(): Promise<void> {
   void listen('check-update', () => void lookForUpdate(true));
   try {
     await settleFolder();
-    await boot(desktop);
+    await boot(desktopBackend());
   } catch (e) {
     console.error(e);
     await system.tell(`ボードのフォルダを開けませんでした。\n\n${e instanceof Error ? e.message : String(e)}\n\n${shortcuts('表示 > 再読み込み（⌘R）')}でやり直せます。`);
