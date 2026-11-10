@@ -26,7 +26,6 @@ function flaky(board: Doc) {
   const box = { failing: 0, writes: 0, kept };
   const backend: Backend = {
     mode: 'server',
-    writer: Math.random().toString(36).slice(2, 12),
     assets: false,
     assetUrl: (_, src) => src,
     fitsExitSave: () => true,

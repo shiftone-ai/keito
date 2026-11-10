@@ -11,7 +11,7 @@ import { upgradePreset } from '../model/video';
 import { isCatcher } from '../ui/keys';
 import type { Doc, UserPreset } from '../model/types';
 import { type Platform, shortcuts, usePlatform } from './io';
-import { type Backend, type BoardInfo, type BoardNews, Conflict, Gone, type TrashedBoard, assetOf } from './storage';
+import { type Backend, type BoardInfo, type BoardNews, Conflict, Gone, type TrashedBoard, assetOf, newWriter } from './storage';
 import { offerUpdate, startUpdate } from './update';
 
 /**
@@ -35,11 +35,10 @@ function refusal(e: unknown): Error {
 /** Each desktop connection remembers only the versions it read and wrote. */
 export function desktopBackend(): Backend {
   const serials = new Map<string, number>();
-  const writer = Math.random().toString(36).slice(2, 12);
+  const writer = newWriter();
   const desktop: Backend = {
     // Boards are kept in files on this machine, as with the dev server.
     mode: 'server',
-    writer,
     assets: true,
     list: async () => (await invoke<BoardInfo[]>('list_boards')).map((b) => ({ ...b, kind: boardKind(b.kind) })),
     load: async (id) => {
@@ -89,7 +88,9 @@ export function desktopBackend(): Backend {
     watch: (news) => {
       let stop: (() => void) | null = null;
       let stopped = false;
-      void listen<BoardNews>('board-changed', (e) => news(e.payload)).then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+      void listen<BoardNews>('board-changed', (e) => {
+        if (e.payload.writer !== writer) news(e.payload);
+      }).then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
       return () => {
         stopped = true;
         stop?.();

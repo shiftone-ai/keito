@@ -40,8 +40,6 @@ export interface BoardNews {
 export interface Backend {
   /** Where boards are kept: in files on this machine, or in this browser. */
   mode: 'server' | 'local';
-  /** Identity used for this connection's own change notifications. */
-  writer: string;
   /** Whether pictures are kept apart from the board, in its folder (else inside the board). */
   assets: boolean;
   /** Hear of boards written elsewhere (the command line, another window); returns how to stop. */
@@ -190,7 +188,6 @@ export const localBoards = (): Doc[] => localList().map((b) => localLoad(b.id)).
 
 export const local: Backend = {
   mode: 'local',
-  writer: Math.random().toString(36).slice(2, 12),
   assets: false,
   assetUrl: (_boardId, src) => src,
   // Browser storage is written on the spot.
@@ -283,20 +280,23 @@ async function ok(res: Response): Promise<Response> {
   return res;
 }
 
+/** One connection's identity, used to ignore its own change notifications. */
+export const newWriter = (): string => Math.random().toString(36).slice(2, 12);
+
 /** Each connection remembers only the versions it read and wrote. */
 function serverBackend(): Backend {
   const serials = new Map<string, number>();
-  const writer = Math.random().toString(36).slice(2, 12);
+  const writer = newWriter();
   return {
     mode: 'server',
-    writer,
     assets: true,
     watch(news) {
       if (typeof EventSource === 'undefined') return () => {};
       const events = new EventSource('/api/events');
       events.onmessage = (m) => {
         try {
-          news(JSON.parse(m.data));
+          const change: BoardNews = JSON.parse(m.data);
+          if (change.writer !== writer) news(change);
         } catch {
           // Not news.
         }

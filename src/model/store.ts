@@ -1334,8 +1334,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
     unwatch = b.watch?.((news) => {
       if (disposed || backend !== b) return;
       const current = scope();
-      // Its own writes this page knows already.
-      if (news.writer === b.writer) return;
       const s = useStore.getState();
       if (news.id === s.doc.id) {
         if (b.serialOf?.(news.id) !== news.serial) void run(pickUp);

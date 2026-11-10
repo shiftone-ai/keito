@@ -38,7 +38,6 @@ export function versionedDisk(boards: Doc[]) {
   const box = { kept, delay: 0, notify: (news: BoardNews) => watchers.forEach((hear) => hear(news)) };
   const backend: Backend = {
     mode: 'server',
-    writer: Math.random().toString(36).slice(2, 12),
     assets: false,
     watch: (hear) => { watchers.add(hear); return () => { watchers.delete(hear); }; },
     assetUrl: (_, src) => src,
