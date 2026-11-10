@@ -3,14 +3,23 @@ import { boardBeside } from './BoardTabs';
 import { composing, isCatcher, isField, overBoard } from './keys';
 
 /**
- * ⌘⇧] and ⌘⇧[ (Ctrl+Shift on Windows), the keys other apps use for the next and the previous tab:
- * 1, −1, or 0 for any other key. Matched by e.key, not e.code: the keys sit elsewhere on a Japanese
- * keyboard, and with ⌘ held the character may come shifted ({ }) or not.
+ * The keys other apps use for the next and the previous tab: 1, −1, or 0 for any other key.
+ * - ⌘⇧] / ⌘⇧[ (Ctrl+Shift on Windows), matched by e.key, not e.code: the keys sit elsewhere on a
+ *   Japanese keyboard, and with ⌘ held the character may come shifted ({ }) or not.
+ * - ⌃Tab / ⌃⇧Tab, and Ctrl+PageDown / Ctrl+PageUp as on Windows: Ctrl without ⌘. With Shift,
+ *   PageDown and PageUp move the tab itself in browsers rather than go to another.
  */
-function tabStep(e: KeyboardEvent): -1 | 0 | 1 {
-  if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return 0;
-  if (e.key === '[' || e.key === '{') return -1;
-  if (e.key === ']' || e.key === '}') return 1;
+export function tabStep(e: KeyboardEvent): -1 | 0 | 1 {
+  if (e.altKey) return 0;
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+    if (e.key === ']' || e.key === '}') return 1;
+    if (e.key === '[' || e.key === '{') return -1;
+  }
+  if (e.ctrlKey && !e.metaKey) {
+    if (e.key === 'Tab') return e.shiftKey ? -1 : 1;
+    if (e.key === 'PageDown' && !e.shiftKey) return 1;
+    if (e.key === 'PageUp' && !e.shiftKey) return -1;
+  }
   return 0;
 }
 
@@ -48,7 +57,7 @@ function onTabKey(e: KeyboardEvent): void {
 }
 
 /**
- * ⌘⇧] / ⌘⇧[ in the desktop app (in a browser, these keys switch the browser's own tabs). Listened
+ * The tab keys in the desktop app (in a browser, these keys switch the browser's own tabs). Listened
  * to in the capture phase: the board's text editor stops key events from bubbling.
  */
 export function listenTabKeys(): void {
