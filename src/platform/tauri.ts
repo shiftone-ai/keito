@@ -9,7 +9,7 @@ import { boardKind, readBoard, readSerial } from '../model/load';
 import { boot, flushBeforeClose, useStore } from '../model/store';
 import { upgradePreset } from '../model/video';
 import { inGesture } from '../canvas/Canvas';
-import { boardBeside } from '../ui/BoardTabs';
+import { nextTab, openTab } from '../ui/BoardTabs';
 import { composing, isCatcher, tabStep } from '../ui/keys';
 import type { Doc, UserPreset } from '../model/types';
 import { type Platform, shortcuts, usePlatform } from './io';
@@ -291,14 +291,13 @@ export async function startDesktop(): Promise<void> {
       if (!step || ime || inGesture() || document.body.classList.contains('row-dragging') || document.querySelector('.modal-bg, .project-menu')) return;
       e.preventDefault();
       e.stopPropagation();
-      if (!boardBeside(useStore.getState().doc, useStore.getState().boards, step)) return;
+      if (!nextTab(step)) return;
       // Leaving the field takes what is typed there, as the click does; the tabs are then taken as
       // they are (a project name just typed puts the board among other tabs).
       const field = document.activeElement;
       if (field instanceof HTMLElement && !isCatcher(field) && (field.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(field.tagName))) field.blur();
-      const s = useStore.getState();
-      const to = boardBeside(s.doc, s.boards, step);
-      if (to) s.openBoard(to);
+      const to = nextTab(step);
+      if (to) openTab(to);
     },
     true,
   );

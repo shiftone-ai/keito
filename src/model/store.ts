@@ -112,7 +112,8 @@ interface State {
   /** Open or close a side panel (toggled when `on` is left out). */
   setDock(dock: Dock, on?: boolean): void;
   fit(): void;
-  openBoard(id: string): void;
+  /** Settles once the board is open, or the opening has ended otherwise (kept, failed, overtaken). */
+  openBoard(id: string): Promise<void>;
   newBoard(doc?: Doc): void;
   deleteBoard(id: string): void;
   /** Give every board of a project another project name (案件名). */
@@ -238,7 +239,7 @@ export const useStore = create<State>((set, get) => ({
     const k = Math.min(1.25, (width - 120) / Math.max(1, box.w), (height - 120) / Math.max(1, box.h));
     set({ view: { k, x: (width - box.w * k) / 2 - box.x * k, y: (height - box.h * k) / 2 - box.y * k } });
   },
-  openBoard: (id) => void run(async (b) => {
+  openBoard: (id) => run(async (b) => {
     if (id === get().doc.id) return;
     const was = get();
     const doc = await switchTo(b, id);

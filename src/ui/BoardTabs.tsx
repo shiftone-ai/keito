@@ -26,12 +26,36 @@ export function useProjectTabs(): BoardInfo[] {
   return projectTabs(doc, boards);
 }
 
-/** The board a tab on from the open one (−1: a tab back), round from either end; none when it has the only tab. */
-export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1): string | undefined {
+/**
+ * The board a tab on (−1: a tab back) from `from`, a tab of the open board's project, or else from
+ * the open board; round from either end. None when the open board has the only tab.
+ */
+export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1, from?: string): string | undefined {
   const tabs = projectTabs(doc, boards);
   if (tabs.length < 2) return undefined;
-  const at = tabs.findIndex((b) => b.id === doc.id);
-  return tabs[(at + step + tabs.length) % tabs.length].id;
+  const at = tabs.findIndex((b) => b.id === from);
+  const here = at >= 0 ? at : tabs.findIndex((b) => b.id === doc.id);
+  return tabs[(here + step + tabs.length) % tabs.length].id;
+}
+
+/** The board the last press of ⌘⇧] or ⌘⇧[ opens, until it has opened (or the opening has ended otherwise). */
+let opening: string | undefined;
+
+/**
+ * The board a press of ⌘⇧] (1) or ⌘⇧[ (−1) goes to: a tab on from the board the last press is still
+ * opening, so that presses quicker than a board opens (a key held down) each go a tab further.
+ */
+export function nextTab(step: 1 | -1): string | undefined {
+  const { doc, boards } = useStore.getState();
+  return boardBeside(doc, boards, step, opening);
+}
+
+/** Opens the board a press went to. */
+export function openTab(id: string): void {
+  opening = id;
+  void useStore.getState().openBoard(id).finally(() => {
+    if (opening === id) opening = undefined;
+  });
 }
 
 /** The project's boards as tabs under the top bar: one click to another board of the same project. */
