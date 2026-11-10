@@ -398,11 +398,11 @@ export function createEditSession(options: { page?: boolean } = {}) {
         // The old drawing becomes the live board (and is saved); undo brings back what it replaced.
         set({ doc: { ...doc, revisions: kept ?? before.revisions }, viewing: null, past: [before], future: [], selection: [], editing: null });
       }),
-      deleteRevision: (id) => void run(async (b, current) => {
+      deleteRevision: (id) => void run(async (b) => {
         if (get().viewing) return;
         const board = get().doc.id;
         await b.removeRevision(board, id);
-        if (!current()) return;
+        if (!active()) return;
         await setRevisions(b, board, (list) => list.filter((r) => r.id !== id));
       }),
       savePreset: (deviceId) => void run(async (b) => {
@@ -523,17 +523,16 @@ export function createEditSession(options: { page?: boolean } = {}) {
           // After the board has been fitted to the window: the node, in the middle.
           frame(() => frame(() => centerOn(nodeId)));
         }),
-      deleteBoard: (id) => void run(async (b, current) => {
+      deleteBoard: (id) => void run(async (b) => {
         if (id === get().doc.id) clearTimeout(timer);
         await b.remove(id);
         if (!active()) return;
         const boards = await b.list();
         if (!active()) return;
-        set({ boards });
-        if (!current()) return;
         // A deleted fellow of the project is no longer written to when something shared changes.
-        set({ others: get().others.filter((d) => d.id !== id) });
+        set({ boards, others: get().others.filter((d) => d.id !== id) });
         if (id !== get().doc.id) return;
+        const current = scope();
         const ticket = ++opening;
         let next: Doc | null = null;
         for (const info of boards) {

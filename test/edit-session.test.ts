@@ -82,6 +82,62 @@ describe('independent edit sessions', () => {
     }
   });
 
+  it('leaves a deleted board after switching away and back while removal is pending', async () => {
+    const { createEditSession } = await import('../src/model/store');
+    const session = createEditSession();
+    const { backend, box } = versionedDisk([
+      { ...blank('aaa'), meta: { title: 'A', project: 'P' } },
+      { ...blank('bbb'), meta: { title: 'B', project: 'P' } },
+    ]);
+    const remove = backend.remove;
+    backend.remove = async (id) => { await new Promise((r) => setTimeout(r, 100)); await remove(id); };
+    try {
+      await session.boot(backend);
+      const s = () => session.useStore.getState();
+      s().deleteBoard('aaa');
+      s().openBoard('bbb');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(s().doc.id).toBe('bbb');
+      expect(s().others.map((d) => d.id)).toContain('aaa');
+      s().openBoard('aaa');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(s().doc.id).toBe('aaa');
+      await vi.advanceTimersByTimeAsync(200);
+      expect(box.kept.has('aaa')).toBe(false);
+      expect(s().doc.id).toBe('bbb');
+      expect(s().others.map((d) => d.id)).not.toContain('aaa');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('removes a deleted revision from its board after switching away during removal', async () => {
+    const { createEditSession } = await import('../src/model/store');
+    const session = createEditSession();
+    const { backend, box } = versionedDisk([
+      { ...blank('aaa'), revisions: [{ id: 'old', at: '2026-11-10T00:00:00.000Z', name: 'Earlier' }] },
+      blank('bbb'),
+    ]);
+    const remove = backend.removeRevision;
+    backend.removeRevision = async (board, id) => { await new Promise((r) => setTimeout(r, 100)); await remove(board, id); };
+    try {
+      await session.boot(backend);
+      const s = () => session.useStore.getState();
+      s().deleteRevision('old');
+      s().openBoard('bbb');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(s().doc.id).toBe('bbb');
+      await vi.advanceTimersByTimeAsync(200);
+      s().openBoard('aaa');
+      await vi.advanceTimersByTimeAsync(10);
+      expect(s().doc.id).toBe('aaa');
+      expect(s().doc.revisions?.map((r) => r.id)).not.toContain('old');
+      expect(box.kept.get('aaa')?.doc.revisions?.map((r) => r.id)).not.toContain('old');
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('keeps editing, selection, undo and saving on their own boards', async () => {
     const { createEditSession } = await import('../src/model/store');
     const left = createEditSession();
