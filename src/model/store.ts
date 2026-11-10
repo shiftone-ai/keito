@@ -240,7 +240,8 @@ export const useStore = create<State>((set, get) => ({
     set({ view: { k, x: (width - box.w * k) / 2 - box.x * k, y: (height - box.h * k) / 2 - box.y * k } });
   },
   openBoard: (id) => run(async (b) => {
-    if (id === get().doc.id) return;
+    // The board on screen asked for again: one asked for meanwhile, still opening, is called off.
+    if (id === get().doc.id) return void ++opening;
     const was = get();
     const doc = await switchTo(b, id);
     if (doc === 'stayed') return showInUrl(get().doc.id);

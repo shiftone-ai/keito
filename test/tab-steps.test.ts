@@ -23,4 +23,14 @@ describe('⌘⇧] pressed again while the next board is opening', () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(useStore.getState().doc.id).toBe('c');
   });
+
+  it('stays on the board on screen when pressed back to it before the next one opens', async () => {
+    const { useStore } = await import('../src/model/store');
+    const { nextTab, openTab } = await import('../src/ui/BoardTabs');
+    const here = useStore.getState().doc.id;
+    openTab(nextTab(1)!);
+    openTab(nextTab(-1)!);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(useStore.getState().doc.id).toBe(here);
+  });
 });
