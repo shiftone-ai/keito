@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { blank } from './helpers';
 import type { DeviceNode } from '../src/model/types';
 import { stubPage, versionedDisk } from './page';
-import { makeNode } from '../src/model/presets';
+import { makeImage, makeNode } from '../src/model/presets';
 
 let page: ReturnType<typeof stubPage>;
 beforeEach(() => { page = stubPage(); });
@@ -12,6 +12,29 @@ afterEach(() => {
 });
 
 describe('independent edit sessions', () => {
+  it('continues migrating boards when an embedded image cannot be stored', async () => {
+    const { createEditSession } = await import('../src/model/store');
+    const session = createEditSession({ page: true });
+    const image = makeImage(new Set(), { src: 'data:image/png;base64,AA==', w: 10, h: 10, name: 'Picture' }, 0, 0);
+    const broken = { ...blank('bad'), nodes: [image] };
+    const next = { ...blank('good'), meta: { title: 'Migrated', project: '' } };
+    page.storage.set('keito:boards', JSON.stringify([broken, next].map((d) => ({ id: d.id, title: d.meta.title, project: '', updated: 0 }))));
+    page.storage.set('keito:board:bad', JSON.stringify(broken));
+    page.storage.set('keito:board:good', JSON.stringify(next));
+    const { backend, box } = versionedDisk([blank('aaa')]);
+    backend.assets = true;
+    backend.putAsset = async () => { throw new Error('asset unavailable'); };
+    try {
+      await session.boot(backend);
+      expect(box.kept.get('good')?.doc.meta.title).toBe('Migrated');
+      expect(session.useStore.getState().ready).toBe(true);
+      expect(session.useStore.getState().saving).toBe('saved');
+      expect(session.currentBoard().id).toBe('aaa');
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('opening a board survives deleting another one meanwhile', async () => {
     const { boot, useStore, defaultSession } = await import('../src/model/store');
     const { backend, box } = versionedDisk([blank('aaa'), blank('bbb'), blank('ccc')]);
@@ -142,7 +165,7 @@ describe('independent edit sessions', () => {
       await session.boot(backend);
       box.kept.set('aaa', { doc: { ...blank('aaa'), meta: { title: 'External A', project: 'P' } }, serial: 2 });
       box.delay = 100;
-      page.listeners.focus();
+      box.notify({ id: 'aaa', serial: 2 });
       await vi.advanceTimersByTimeAsync(10);
       box.delay = 0;
       session.useStore.getState().openBoard('bbb');
@@ -190,9 +213,8 @@ describe('independent edit sessions', () => {
       await session.boot(backend);
       const stop = session.onOperation((event) => phases.push(event));
       const s = () => session.useStore.getState();
-      s().beginOperation({ origin, board: 'aaa' });
+      s().checkpoint({ origin, board: 'aaa' });
       s().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'Committed' } }), false);
-      s().commitOperation();
       s().checkpoint({ origin, board: 'aaa' });
       s().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'Cancelled' } }), false);
       s().dropStep();
@@ -203,6 +225,29 @@ describe('independent edit sessions', () => {
         { phase: 'cancel', origin, board: 'aaa' },
       ]);
       expect(s().doc.meta.title).toBe('Committed');
+      const text = { ...makeNode('text', 0, 0, new Set()), text: '' };
+      s().mutate((d) => ({ ...d, nodes: [...d.nodes, text] }));
+      s().setEditing(text.id);
+      s().updateNode(text.id, { h: 120 }, false);
+      s().updateNode(text.id, { text: 'First words' }, false);
+      s().setEditing(null);
+      expect(phases.at(-1)).toEqual({ phase: 'begin', origin: 'local', board: 'aaa' });
+      s().undo();
+      expect(s().doc.nodes).toEqual([]);
+      s().redo();
+      expect(s().doc.nodes).toMatchObject([{ id: text.id, text: 'First words', h: 120 }]);
+      s().dropStep();
+      // A closed step still rolls back, without reporting another cancellation.
+      expect(phases.at(-1)).toEqual({ phase: 'commit', origin: 'local', board: 'aaa' });
+      s().mutate((d) => ({ ...d, nodes: [...d.nodes, text] }));
+      s().setEditing(text.id);
+      s().setEditing(null);
+      s().dropStep();
+      expect(phases.slice(-2)).toEqual([
+        { phase: 'begin', origin: 'local', board: 'aaa' },
+        { phase: 'cancel', origin: 'local', board: 'aaa' },
+      ]);
+      expect(s().doc.nodes).toEqual([]);
       await session.saveNow();
       expect(box.kept.get('aaa')?.doc.meta.title).toBe('Committed');
       stop();
@@ -242,7 +287,6 @@ describe('independent edit sessions', () => {
     session.dispose();
     const doc = structuredClone(session.currentBoard());
     box.notify({ id: 'aaa', serial: 5 });
-    page.listeners.focus();
     await vi.advanceTimersByTimeAsync(180_000);
     // A write already sent can finish, but cannot restart work or alter the closed editor.
     expect(box.kept.get('aaa')?.doc.meta.title).toBe('Sent before close');
@@ -250,7 +294,7 @@ describe('independent edit sessions', () => {
     expect(session.currentBoard()).toEqual(doc);
   });
 
-  it('does not finish an old project push after changing projects', async () => {
+  it('does not finish an old project push after switching boards', async () => {
     const { createEditSession } = await import('../src/model/store');
     const session = createEditSession();
     const node: DeviceNode = { id: 'pc', type: 'device', x: 0, y: 0, w: 160, h: 0, text: 'PC', maker: '', model: '', category: '', note: '', ports: [], shared: 'gear', sharedAt: 1 };
@@ -340,25 +384,4 @@ describe('independent edit sessions', () => {
     }
   });
 
-  it('does not start image uploads when a closed editor finishes creating a board', async () => {
-    const { createEditSession } = await import('../src/model/store');
-    const { makeImage } = await import('../src/model/presets');
-    const session = createEditSession();
-    const { backend } = versionedDisk([blank('aaa')]);
-    backend.assets = true;
-    const save = backend.save;
-    const images = new Map<string, string>();
-    backend.save = async (doc) => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await save(doc);
-    };
-    backend.putAsset = async (id, data) => { images.set(id, data); return 'asset:image.png'; };
-    await session.boot(backend);
-    session.useStore.getState().newBoard({ ...blank('bbb'), nodes: [makeImage(new Set(), { src: 'data:image/png;base64,AA==', w: 10, h: 10, name: 'Picture' }, 0, 0)] });
-    await vi.advanceTimersByTimeAsync(10);
-    session.dispose();
-    await vi.advanceTimersByTimeAsync(200);
-    expect(images.size).toBe(0);
-    expect(session.useStore.getState().doc.id).toBe('aaa');
-  });
 });

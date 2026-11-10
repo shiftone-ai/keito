@@ -7,7 +7,7 @@ import { type CreateKind, allIds, makeEdge, makeImage, makeNode } from '../model
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
-import { type EditOperation, type Placing, duplicateInPlace, storeImage, useStore } from '../model/store';
+import { type Placing, duplicateInPlace, storeImage, useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
 import { isImageFile, readImageFile } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
@@ -254,7 +254,6 @@ export function Canvas() {
   const [busy, setBusy] = useState(false);
   const [space, setSpace] = useState(false);
   const drag = useRef<Drag | null>(null);
-  const gestureStep = useRef<EditOperation | null>(null);
   /** The plan last shown, kept while the target stays the same so its routes are not worked out again. */
   const lastPlan = useRef<Plan | null>(null);
   const keepPlan = (plan: Plan | null): Plan | null => {
@@ -271,7 +270,6 @@ export function Canvas() {
   };
   const begin = (e: RPointerEvent, d: Drag) => {
     drag.current = d;
-    gestureStep.current = null;
     gesture = true;
     setBusy(true);
     try {
@@ -368,8 +366,12 @@ export function Canvas() {
     const up = () => setSpace(false);
     // Leaving the window mid-gesture must not leave a drag or pan half-finished.
     const reset = () => {
-      finishGesture();
+      drag.current = null;
+      gesture = false;
       setSpace(false);
+      setBusy(false);
+      setGhost(null);
+      setGuides({});
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -655,7 +657,7 @@ export function Canvas() {
       if (!d.moved) {
         if (Math.hypot(p.x - d.start.x, p.y - d.start.y) * s.view.k < 3) return;
         d.moved = true;
-        gestureStep.current = s.checkpoint();
+        s.checkpoint();
       }
       const pts = routeEdges(s.doc).get(d.id);
       if (!pts) return;
@@ -669,7 +671,7 @@ export function Canvas() {
       if (!d.moved) {
         if (Math.abs(delta) * s.view.k < 3) return;
         d.moved = true;
-        gestureStep.current = s.checkpoint();
+        s.checkpoint();
       }
       // Slide the segment sideways: both of its bend points move together. Close to the level of
       // the bend before or after, it clicks into line with it — that is how a detour is undone.
@@ -694,7 +696,7 @@ export function Canvas() {
     if (!d.moved) {
       if (Math.hypot(dx, dy) * s.view.k < 3) return;
       d.moved = true;
-      gestureStep.current = s.checkpoint();
+      s.checkpoint();
       if (d.kind === 'move' && d.dup) {
         // The copies take the originals' places in the drag (in the same undo step).
         const map = duplicateInPlace(s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id)));
@@ -774,11 +776,8 @@ export function Canvas() {
     s.updateNode(d.id, { x, y, w, h }, false);
   };
 
-  /** Finish the gesture's own edit and put away its preview. */
-  const finishGesture = () => {
-    const step = gestureStep.current;
-    gestureStep.current = null;
-    if (step) st().commitOperation(step);
+  /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
+  const onCancel = () => {
     drag.current = null;
     gesture = false;
     lastPlan.current = null;
@@ -787,69 +786,69 @@ export function Canvas() {
     setBusy(false);
   };
 
-  const onCancel = finishGesture;
-
   const onUp = (e: RPointerEvent) => {
     const d = drag.current;
-    try {
-      // The pointer was held by the canvas, so the box it left from never heard it go: its dots
-      // would stay lit. They come back as soon as the pointer moves onto a box again.
-      if (d?.kind === 'connect' || d?.kind === 'reconnect') {
-        setHoverSide(null);
-        setHover(null);
-        setHush(nodeAt(st().doc, world(e))?.id ?? null);
-      }
-      if (d?.kind === 'place') {
-        // Worked out from the pointer itself: a quick drag may end before its outline was ever drawn.
-        const p = world(e);
-        const rect = { x: Math.min(d.start.x, p.x), y: Math.min(d.start.y, p.y), w: Math.abs(p.x - d.start.x), h: Math.abs(p.y - d.start.y) };
-        const sized = tool !== 'sequence' && (rect.w > 8 / st().view.k || rect.h > 8 / st().view.k);
-        if (placesBox(tool)) insertNode(tool, sized ? center(rect) : d.start, sized ? rect : undefined);
-        return;
-      }
-      if (d?.kind === 'marquee' && d.area && Math.hypot(e.clientX - d.area.sx, e.clientY - d.area.sy) <= 4) {
-        const id = d.area.id;
-        st().select(e.shiftKey ? (d.base.includes(id) ? d.base.filter((x) => x !== id) : [...d.base, id]) : [id]);
-        return;
-      }
-      if (d?.kind === 'segment') {
-        // Bends that ended up on a straight run are dropped; a route with none left is automatic again.
-        const s = st();
-        const pts = d.moved ? routeEdges(s.doc).get(d.id) : undefined;
-        if (pts) {
-          const route = simplify(pts).slice(1, -1);
-          s.updateEdge(d.id, { route: route.length >= 2 ? route : undefined, tidied: undefined }, false);
-        }
-        return;
-      }
-      if (d?.kind === 'reconnect') {
-        const s = st();
-        const plan = planReconnect(s.doc, d, world(e), s.view.k);
-        if (plan) s.setDoc(plan.doc);
-        return;
-      }
-      if (d?.kind !== 'connect') return;
-      const s = st();
-      // A plain click on a side dot adds the next shape in that direction.
-      if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= 4) {
-        if (d.side) spawnFrom(d.from.node, d.side);
-        return;
-      }
+    drag.current = null;
+    gesture = false;
+    setGhost(null);
+    lastPlan.current = null;
+    // The pointer was held by the canvas, so the box it left from never heard it go: its dots
+    // would stay lit. They come back as soon as the pointer moves onto a box again.
+    if (d?.kind === 'connect' || d?.kind === 'reconnect') {
+      setHoverSide(null);
+      setHover(null);
+      setHush(nodeAt(st().doc, world(e))?.id ?? null);
+    }
+    setGuides({});
+    setBusy(false);
+    if (d?.kind === 'place') {
+      // Worked out from the pointer itself: a quick drag may end before its outline was ever drawn.
       const p = world(e);
-      const plan = planConnect(s.doc, d, p, s.view.k);
-      const made = plan ? null : planSpawn(s.doc, d, p);
-      if (plan) {
-        s.setDoc(plan.doc);
-        s.select([plan.edge]);
-      } else if (made?.made) {
-        // Dropping on empty canvas puts the next shape right there, ready to be named.
-        s.setDoc(made.doc);
-        s.select([made.made]);
-        fresh = made.made;
-        s.setEditing(made.made);
+      const rect = { x: Math.min(d.start.x, p.x), y: Math.min(d.start.y, p.y), w: Math.abs(p.x - d.start.x), h: Math.abs(p.y - d.start.y) };
+      const sized = tool !== 'sequence' && (rect.w > 8 / st().view.k || rect.h > 8 / st().view.k);
+      if (placesBox(tool)) insertNode(tool, sized ? center(rect) : d.start, sized ? rect : undefined);
+      return;
+    }
+    if (d?.kind === 'marquee' && d.area && Math.hypot(e.clientX - d.area.sx, e.clientY - d.area.sy) <= 4) {
+      const id = d.area.id;
+      st().select(e.shiftKey ? (d.base.includes(id) ? d.base.filter((x) => x !== id) : [...d.base, id]) : [id]);
+      return;
+    }
+    if (d?.kind === 'segment') {
+      // Bends that ended up on a straight run are dropped; a route with none left is automatic again.
+      const s = st();
+      const pts = d.moved ? routeEdges(s.doc).get(d.id) : undefined;
+      if (pts) {
+        const route = simplify(pts).slice(1, -1);
+        s.updateEdge(d.id, { route: route.length >= 2 ? route : undefined, tidied: undefined }, false);
       }
-    } finally {
-      finishGesture();
+      return;
+    }
+    if (d?.kind === 'reconnect') {
+      const s = st();
+      const plan = planReconnect(s.doc, d, world(e), s.view.k);
+      if (plan) s.setDoc(plan.doc);
+      return;
+    }
+    if (d?.kind !== 'connect') return;
+    const s = st();
+    // A plain click on a side dot adds the next shape in that direction.
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= 4) {
+      if (d.side) spawnFrom(d.from.node, d.side);
+      return;
+    }
+    const p = world(e);
+    const plan = planConnect(s.doc, d, p, s.view.k);
+    const made = plan ? null : planSpawn(s.doc, d, p);
+    if (plan) {
+      s.setDoc(plan.doc);
+      s.select([plan.edge]);
+    } else if (made?.made) {
+      // Dropping on empty canvas puts the next shape right there, ready to be named.
+      s.setDoc(made.doc);
+      s.select([made.made]);
+      fresh = made.made;
+      s.setEditing(made.made);
     }
   };
 

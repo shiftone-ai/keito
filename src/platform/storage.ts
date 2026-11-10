@@ -406,12 +406,10 @@ export const assetUrl = (boardId: string | undefined, src: string): string =>
   src.startsWith('asset:') && boardId && current ? current.assetUrl(boardId, src) : src;
 
 /** Move embedded pictures (data URLs) out of the board into its asset folder. */
-export async function externalize(doc: Doc, backend: Backend, signal?: AbortSignal): Promise<Doc> {
-  signal?.throwIfAborted();
+export async function externalize(doc: Doc, backend: Backend): Promise<Doc> {
   if (!backend.assets || !doc.nodes.some((n) => n.type === 'image' && n.src.startsWith('data:'))) return doc;
   // Assets hang off the board's folder, which exists once the board has been saved.
   await backend.save(doc);
-  signal?.throwIfAborted();
   const nodes = await Promise.all(doc.nodes.map(async (n) => (n.type === 'image' && n.src.startsWith('data:') ? { ...n, src: await backend.putAsset(doc.id, n.src) } : n)));
   return { ...doc, nodes };
 }

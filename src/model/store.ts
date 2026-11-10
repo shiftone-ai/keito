@@ -100,16 +100,12 @@ interface State {
   /** A short word on what was just done (what a delete took with it …), shown for a moment. */
   notice: string | null;
 
-  /** Push the current doc onto the undo stack (call before a drag or a burst of edits). */
-  checkpoint(context?: Partial<EditOperation>): EditOperation | null;
+  /** Start an operation and push the current doc onto the undo stack (before a drag or a burst). */
+  checkpoint(context?: Partial<EditOperation>): void;
   /** Take back the last undo step without leaving it to redo: what it did is called off, not undone. */
   dropStep(): void;
-  /** Start an edit on the open board; null when closed, viewing history or targeting another board. */
-  beginOperation(context?: Partial<EditOperation>): EditOperation | null;
-  /** Finish the active edit. A supplied handle must still be active. */
-  commitOperation(step?: EditOperation): void;
-  /** Restore the active edit's base. An older handle cannot cancel a newer edit. */
-  cancelOperation(step?: EditOperation): void;
+  /** Finish the active operation. */
+  commitOperation(): void;
   /** Replace the doc. `record` adds an undo step. */
   setDoc(doc: Doc, record?: boolean): void;
   mutate(fn: (d: Doc) => Doc, record?: boolean): void;
@@ -166,38 +162,27 @@ interface State {
 export function createEditSession(options: { page?: boolean } = {}) {
   let disposed = false;
   let generation = 0;
-  let projectGeneration = 0;
   const active = (): boolean => !disposed;
-  const lifetime = new AbortController();
-  let boardLifetime = new AbortController();
   /** Work started on an older board cannot change the board now on screen. */
   const scope = (): (() => boolean) => {
     const ticket = generation;
     return () => active() && ticket === generation;
   };
-  const projectScope = (): (() => boolean) => {
-    const current = scope();
-    const ticket = projectGeneration;
-    return () => current() && ticket === projectGeneration;
-  };
   let unwatch: (() => void) | undefined;
   const cleanups: (() => void)[] = [];
-  const frames = new Set<number>();
   function frame(fn: () => void): void {
     const current = scope();
-    const id = requestAnimationFrame(() => {
-      frames.delete(id);
+    requestAnimationFrame(() => {
       if (current()) fn();
     });
-    frames.add(id);
   }
   function subscribe(listener: (s: State, prev: State) => void): void {
     cleanups.push(useStore.subscribe(listener));
   }
   function onWindow<K extends keyof WindowEventMap>(type: K, listener: (event: WindowEventMap[K]) => void): void {
-    const hear = (event: WindowEventMap[K]) => { if (!disposed) listener(event); };
-    window.addEventListener(type, hear);
-    cleanups.push(() => window.removeEventListener(type, hear));
+    if (!options.page) return;
+    window.addEventListener(type, listener);
+    cleanups.push(() => window.removeEventListener(type, listener));
   }
   function showAddress(id: string): void {
     if (options.page) showInUrl(id);
@@ -213,44 +198,38 @@ export function createEditSession(options: { page?: boolean } = {}) {
   const operations = new Set<(event: OperationEvent) => void>();
 
   function onOperation(listener: (event: OperationEvent) => void): () => void {
-    if (!disposed) operations.add(listener);
+    operations.add(listener);
     return () => { operations.delete(listener); };
   }
-  function beginOperation(context: Partial<EditOperation> = {}): EditOperation | null {
+  function checkpoint(context: Partial<EditOperation> = {}): void {
     const s = useStore.getState();
-    if (disposed || s.viewing || (context.board !== undefined && context.board !== s.doc.id)) return null;
+    if (!active() || s.viewing || (context.board !== undefined && context.board !== s.doc.id)) return;
     commitOperation();
     const step = { origin: context.origin === undefined ? 'local' : context.origin, board: s.doc.id };
     operation = step;
-    useStore.setState({ past: [...s.past.slice(-HISTORY), s.doc], future: [] });
+    set({ past: [...s.past.slice(-HISTORY), s.doc], future: [] });
     operations.forEach((hear) => hear({ ...step, phase: 'begin' }));
-    return step;
   }
-  function commitOperation(step?: EditOperation): void {
-    if (!operation || (step && step !== operation)) return;
+  function commitOperation(): void {
+    if (!operation) return;
     const done = operation;
     operation = null;
     operations.forEach((hear) => hear({ ...done, phase: 'commit' }));
   }
-  function cancelOperation(step?: EditOperation): void {
-    if (!operation || (step && step !== operation)) return;
-    dropStep();
-  }
   function dropStep(): void {
-    if (disposed) return;
     const s = useStore.getState();
     const doc = s.past.at(-1);
     if (!doc) return;
-    const done = operation ?? { origin: 'local', board: s.doc.id };
+    const done = operation;
     operation = null;
-    useStore.setState({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), selection: [], editing: null });
-    operations.forEach((hear) => hear({ ...done, phase: 'cancel' }));
+    set({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), selection: [], editing: null });
+    if (done) operations.forEach((hear) => hear({ ...done, phase: 'cancel' }));
   }
 
-  const useStore = create<State>((apply, get) => {
-    const set = (change: Partial<State> | ((s: State) => Partial<State>)): void => {
-      if (!disposed) apply(change);
-    };
+  function set(change: Partial<State> | ((s: State) => Partial<State>)): void {
+    if (active()) useStore.setState(change);
+  }
+  const useStore = create<State>((_, get) => {
     return {
       doc: emptyDoc(),
       past: [],
@@ -275,18 +254,15 @@ export function createEditSession(options: { page?: boolean } = {}) {
       placing: null,
       setPlacing: (placing) => set({ placing, ...(placing ? { tool: 'select' as Tool } : {}) }),
 
-      checkpoint: beginOperation,
+      checkpoint,
       dropStep,
-      beginOperation,
       commitOperation,
-      cancelOperation,
       setDoc: (doc, record = true) => {
         // An earlier state on screen is for looking at: an edit there would be lost, or restored
         // along with it unseen.
-        if (disposed || get().viewing) return;
-        if (record) beginOperation();
+        if (get().viewing) return;
+        if (record) checkpoint();
         set({ doc: fitLegends(pinComments(get().doc, doc)) });
-        if (record) commitOperation();
       },
       mutate: (fn, record = true) => get().setDoc(fn(get().doc), record),
       updateNode: (id, patch, record = true) =>
@@ -310,7 +286,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
       // The board's history list is not part of the drawing: undo takes back drawing, never a kept state.
       // What was selected stays selected where it is still there, to try the next change on it.
       undo: () => {
-        if (disposed) return;
         commitOperation();
         set((s) => {
           const doc = s.past[s.past.length - 1];
@@ -318,7 +293,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
         });
       },
       redo: () => {
-        if (disposed) return;
         commitOperation();
         set((s) => {
           const doc = s.future[0];
@@ -329,10 +303,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       // Arming a tool puts away whatever was waiting to be placed.
       setTool: (tool) => set({ tool, placing: null }),
       setView: (view) => set({ view }),
-      setEditing: (editing) => {
-        if (!editing) commitOperation();
-        set({ editing });
-      },
+      setEditing: (editing) => set({ editing }),
       setPanel: (panel) => set({ panel }),
       setDock: (dock, on) => set((s) => ({ docks: { ...s.docks, [dock]: on ?? !s.docks[dock] } })),
       fit: () => {
@@ -363,7 +334,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
       }),
       newBoard: (doc = emptyDoc()) => void run(async (b, current) => {
         const ticket = ++opening;
-        const signal = boardLifetime.signal;
         if (!(await leave(b)) || !current() || ticket !== opening) return;
         // A file opened from elsewhere may carry its pictures inline; give them a home in the board's folder.
         // History belongs to the board it was recorded on; a copy or an opened file starts without one.
@@ -374,7 +344,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         const taken = BOARD_ID.test(doc.id) && !!(await b.load(doc.id).catch(() => null));
         if (!current() || ticket !== opening) return;
         const id = BOARD_ID.test(doc.id) && !taken ? doc.id : randomId();
-        const next = await externalize(readBoard({ ...doc, id, revisions: undefined }) ?? { ...doc, id, revisions: undefined }, b, signal);
+        const next = await externalize(readBoard({ ...doc, id, revisions: undefined }) ?? { ...doc, id, revisions: undefined }, b);
         if (!current() || ticket !== opening) return;
         show(next);
         await persist(next);
@@ -525,7 +495,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       linkTo: (nodeId, target) =>
         void run(async (b) => {
           if (get().viewing) return;
-          const current = projectScope();
+          const current = scope();
           const key = await shareKey(b, target);
           if (!current() || !key) return;
           const fresh = (get().others.find((d) => d.id === target.board)?.nodes.find((n) => n.id === target.node.id) as ShareNode | undefined) ?? target.node;
@@ -536,7 +506,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       runOn: (nodeId, host) =>
         void run(async (b) => {
           if (get().viewing) return;
-          const current = projectScope();
+          const current = scope();
           const key = host ? ((await shareKey(b, host)) ?? undefined) : undefined;
           if (!current() || (host && !key)) return;
           get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...n, runsOn: key } : n)) }));
@@ -586,18 +556,18 @@ export function createEditSession(options: { page?: boolean } = {}) {
   async function restoreBoard(key: string): Promise<void> {
     const b = backend;
     const current = scope();
-    if (!b || !active()) return;
+    if (!b) return;
     const id = await b.restore(key);
     if (!active()) return;
     const boards = await b.list();
     if (!active()) return;
-    useStore.setState({ boards });
+    set({ boards });
     if (current()) useStore.getState().openBoard(id);
   }
 
   /** Run a storage action; a failure is said, and marks the board unsaved only if it is. */
   async function run(fn: (b: Backend, current: () => boolean) => Promise<void>): Promise<void> {
-    if (!backend || disposed) return;
+    if (!backend) return;
     const current = scope();
     try {
       await fn(backend, current);
@@ -608,7 +578,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       console.error(e);
       // Something done alongside the board (a preset, a state of its history, opening another)
       // failed: said so, without calling a board that is saved unsaved.
-      if (useStore.getState().doc !== stored) useStore.setState({ saving: 'error' });
+      if (useStore.getState().doc !== stored) set({ saving: 'error' });
       void tell(`うまくいきませんでした: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -631,8 +601,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * The change is described against `previous`, by default the state last kept.
    */
   async function snapshot(b: Backend, doc: Doc, extra: Partial<Revision> = {}, previous: Doc | null = snapBase): Promise<Revision[] | null> {
-    const valid = scope();
-    if (!valid()) return null;
     // A state the history already ends with is not kept twice (unless it is being given a name).
     const current = live?.id === doc.id ? live : useStore.getState().doc;
     if (!extra.name && current.id === doc.id && current.revisions?.at(-1)?.hash === fingerprint(doc)) {
@@ -642,7 +610,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const before = previous?.id === doc.id ? previous : null;
     const entry = entryFor(doc, before, randomId(), { source: 'auto', ...extra });
     await b.saveRevision(doc.id, entry.id, drawingOf(doc));
-    if (!valid()) return null;
+    if (!active()) return null;
     let drop: string[] = [];
     let kept: Revision[] = [];
     await setRevisions(b, doc.id, (list) => {
@@ -652,10 +620,10 @@ export function createEditSession(options: { page?: boolean } = {}) {
       return out.keep;
     });
     for (const id of drop) {
-      if (!valid()) return null;
+      if (!active()) return null;
       await b.removeRevision(doc.id, id).catch(() => {});
     }
-    if (!valid()) return null;
+    if (!active()) return null;
     if (doc.id === (live ?? useStore.getState().doc).id) snapBase = doc;
     return kept;
   }
@@ -736,8 +704,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * by then another board may be open: the list then goes to the board it belongs to, on disk.
    */
   async function setRevisions(b: Backend, board: string, change: (list: Revision[]) => Revision[]): Promise<void> {
-    const current = scope();
-    if (!current()) return;
     const s = useStore.getState();
     if (s.doc.id === board && !s.viewing) return s.setDoc({ ...s.doc, revisions: change(s.doc.revisions ?? []) }, false);
     if (live?.id === board) {
@@ -745,7 +711,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       return;
     }
     const saved = await b.load(board);
-    if (current() && saved) await b.save({ ...saved, revisions: change(saved.revisions ?? []) });
+    if (active() && saved) await b.save({ ...saved, revisions: change(saved.revisions ?? []) });
   }
 
   /**
@@ -756,12 +722,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
   function resetSession(doc: Doc, shown: Doc): void {
     commitOperation();
     generation++;
-    boardLifetime.abort();
-    boardLifetime = new AbortController();
-    opening++;
-    projectRead++;
-    frames.forEach((id) => globalThis.cancelAnimationFrame?.(id));
-    frames.clear();
     clearTimeout(pushTimer);
     pushTimer = undefined;
     clearTimeout(projectTimer);
@@ -791,16 +751,15 @@ export function createEditSession(options: { page?: boolean } = {}) {
 
   /** Put a freshly loaded (or created) board on screen. */
   function show(doc: Doc): void {
-    if (disposed) return;
     // The base is the board as shown (legends fitted), so fitting alone never reads as an edit.
     const shown = fitLegends(doc);
     resetSession(doc, shown);
     const back = kept.get(doc.id);
     kept.delete(doc.id);
     const same = !!back && back.print === fingerprint(shown);
-    useStore.setState({ doc: shown, viewing: null, past: same ? back.past : [], future: same ? back.future : [], selection: [], editing: null, others: [], placing: null, saving: 'saved' });
+    set({ doc: shown, viewing: null, past: same ? back.past : [], future: same ? back.future : [], selection: [], editing: null, others: [], placing: null, saving: 'saved' });
     showAddress(doc.id);
-    if (same) useStore.setState({ view: back.view });
+    if (same) set({ view: back.view });
     else frame(useStore.getState().fit);
     void readProject();
   }
@@ -813,7 +772,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const { width, height } = el.getBoundingClientRect();
     const fits = Math.min((width - 120) / Math.max(1, r.w), (height - 120) / Math.max(1, r.h));
     const k = Math.min(Math.max(view.k, 0.8), Math.max(fits, 0.2), 1.5);
-    useStore.setState({ view: { k, x: width / 2 - (r.x + r.w / 2) * k, y: height / 2 - (r.y + r.h / 2) * k } });
+    set({ view: { k, x: width / 2 - (r.x + r.w / 2) * k, y: height / 2 - (r.y + r.h / 2) * k } });
   }
 
   /**
@@ -834,7 +793,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const { width, height } = el.getBoundingClientRect();
     const inView = x0 * view.k + view.x >= 0 && y0 * view.k + view.y >= 0 && x1 * view.k + view.x <= width && y1 * view.k + view.y <= height;
     if (inView) return;
-    useStore.setState({ view: { ...view, x: width / 2 - ((x0 + x1) / 2) * view.k, y: height / 2 - ((y0 + y1) / 2) * view.k } });
+    set({ view: { ...view, x: width / 2 - ((x0 + x1) / 2) * view.k, y: height / 2 - ((y0 + y1) / 2) * view.k } });
   }
 
   function centerOn(nodeId: string): void {
@@ -844,7 +803,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     if (!n || !el) return;
     const r = nodeRect(n);
     const { width, height } = el.getBoundingClientRect();
-    useStore.setState({ view: { ...view, x: width / 2 - (r.x + r.w / 2) * view.k, y: height / 2 - (r.y + r.h / 2) * view.k } });
+    set({ view: { ...view, x: width / 2 - (r.x + r.w / 2) * view.k, y: height / 2 - (r.y + r.h / 2) * view.k } });
   }
 
   /**
@@ -885,7 +844,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
    */
   function enterConflict(kind: 'conflict' | 'gone'): void {
     clearTimeout(timer);
-    useStore.setState({ saving: kind });
+    set({ saving: kind });
   }
 
   async function write(b: Backend, doc: Doc, current: () => boolean): Promise<void> {
@@ -895,24 +854,24 @@ export function createEditSession(options: { page?: boolean } = {}) {
     // Once the board is in conflict, only the user's choice writes it (a save queued before goes nowhere).
     const held = useStore.getState().saving;
     if (here() && (held === 'conflict' || held === 'gone')) return;
-    if (here()) useStore.setState({ saving: 'saving' });
+    if (here()) set({ saving: 'saving' });
     try {
       await b.save(doc);
       if (!active()) return;
       const info: BoardInfo = { id: doc.id, title: doc.meta.title, updated: Date.now(), project: doc.meta.project || undefined, kind: doc.kind };
-      useStore.setState((s) => ({ boards: [info, ...s.boards.filter((x) => x.id !== doc.id)] }));
+      set((s) => ({ boards: [info, ...s.boards.filter((x) => x.id !== doc.id)] }));
       if (!current()) return;
       stored = doc;
       retries = 0;
       clearTimeout(retryTimer);
-      if (here()) useStore.setState((s) => ({ saving: s.doc === doc ? 'saved' : 'saving', saveError: null }));
+      if (here()) set((s) => ({ saving: s.doc === doc ? 'saved' : 'saving', saveError: null }));
     } catch (e) {
       if (!here()) return console.error(e);
       // Written or deleted elsewhere since it was read here: the user settles it (see resolveConflict).
       if (e instanceof Conflict) return void enterConflict('conflict');
       if (e instanceof Gone) return void enterConflict('gone');
       console.error(e);
-      useStore.setState({ saving: 'error', saveError: e instanceof Error ? e.message : String(e) });
+      set({ saving: 'error', saveError: e instanceof Error ? e.message : String(e) });
       retryLater();
     }
   }
@@ -920,7 +879,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
   /** ⌘S, or "もう一度" after a failed write: what is pending is written now (it is otherwise written by itself). */
   async function saveNow(): Promise<void> {
     const current = scope();
-    if (!current()) return;
     clearTimeout(retryTimer);
     retries = 0;
     const s = useStore.getState();
@@ -933,16 +891,14 @@ export function createEditSession(options: { page?: boolean } = {}) {
   let noticeTimer = 0;
   /** Show a short word for a moment. */
   function say(text: string): void {
-    if (disposed) return;
     clearTimeout(noticeTimer);
-    useStore.setState({ notice: shortcuts(text) });
-    noticeTimer = window.setTimeout(() => useStore.setState({ notice: null }), 4000);
+    set({ notice: shortcuts(text) });
+    noticeTimer = window.setTimeout(() => set({ notice: null }), 4000);
   }
 
   /** Write any pending change now (before switching boards or leaving the page); whether it is all written. */
   async function flush(): Promise<boolean> {
     const current = scope();
-    if (!current()) return false;
     clearTimeout(timer);
     if (keeping) await keeping.catch(() => {});
     if (!current()) return false;
@@ -1002,15 +958,17 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   // Keep the signal-type registry in step with the board on screen.
-  if (options.page) registerSignals(useStore.getState().doc.signals);
-  subscribe((s, prev) => {
-    if (options.page && s.doc.signals !== prev.doc.signals) registerSignals(s.doc.signals);
-  });
+  if (options.page) {
+    registerSignals(useStore.getState().doc.signals);
+    subscribe((s, prev) => {
+      if (s.doc.signals !== prev.doc.signals) registerSignals(s.doc.signals);
+    });
+  }
 
   // A tool the board's kind does not offer (left armed from another board, or before the kind
   // changed) goes back to selecting: its button is not even on the toolbar.
   subscribe((s) => {
-    if (s.tool !== 'select' && s.tool !== 'pan' && !KINDS[s.doc.kind ?? 'system']?.tools.includes(s.tool)) useStore.setState({ tool: 'select' });
+    if (s.tool !== 'select' && s.tool !== 'pan' && !KINDS[s.doc.kind ?? 'system']?.tools.includes(s.tool)) set({ tool: 'select' });
   });
 
   // History: the opened state is kept at the first edit, the edited one once editing pauses.
@@ -1050,7 +1008,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   async function readProject(): Promise<void> {
     const b = backend;
     const current = scope();
-    if (!b || !current()) return;
+    if (!b) return;
     const doc = currentBoard();
     const project = doc.meta.project?.trim();
     const ticket = ++projectRead;
@@ -1064,7 +1022,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       }
     // Another board opened (or another read started) meanwhile: this one is out of date.
     if (!current() || ticket !== projectRead || currentBoard().id !== doc.id) return;
-    useStore.setState({ others });
+    set({ others });
     pullIn();
   }
 
@@ -1076,13 +1034,12 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const next = pull(s.doc, entries);
     if (next === s.doc) return;
     const fix = (d: Doc): Doc => (d.id === s.doc.id ? pull(d, entries) : d);
-    sharing(() => useStore.setState({ doc: fitLegends(next), past: s.past.map(fix), future: s.future.map(fix) }));
+    sharing(() => set({ doc: fitLegends(next), past: s.past.map(fix), future: s.future.map(fix) }));
   }
 
   /** The shared key of a node of the project, given one (and written to its board) if it has none yet. */
   async function shareKey(b: Backend, target: Entry): Promise<string | null> {
-    const current = projectScope();
-    if (!current()) return null;
+    const current = scope();
     if (target.node.shared) return target.node.shared;
     const key = newKey();
     const s = useStore.getState();
@@ -1101,7 +1058,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         await b.save(next);
       }
       if (!current()) return null;
-      useStore.setState((st) => ({ others: st.others.map((o) => (o.id === next.id ? next : o)) }));
+      set((st) => ({ others: st.others.map((o) => (o.id === next.id ? next : o)) }));
       return (next.nodes.find((x) => x.id === n.id) as ShareNode).shared ?? null;
     } catch (e) {
       if (!current()) return null;
@@ -1125,8 +1082,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const b = backend;
     const s = useStore.getState();
     if (!b || s.viewing || !s.doc.meta.project?.trim()) return;
-    const current = projectScope();
-    if (!current()) return;
+    const current = scope();
     const doc = s.doc;
     const mine = catalog([doc]);
     const others = [...s.others];
@@ -1145,7 +1101,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         console.warn(`[keito] ${d.meta.title}: shared change not written`, e);
       }
     }
-    if (current() && useStore.getState().doc.id === doc.id) useStore.setState({ others });
+    if (current() && useStore.getState().doc.id === doc.id) set({ others });
   }
 
   // A shared thing edited here (by hand, undo, the text panel …) becomes the newest version of it.
@@ -1153,7 +1109,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     if (!s.ready || s.viewing || adopting || sharingNow || s.doc === prev.doc || s.doc.id !== prev.doc.id) return;
     const next = stamp(prev.doc, s.doc, Date.now());
     if (next === s.doc) return;
-    sharing(() => useStore.setState({ doc: next }));
+    sharing(() => set({ doc: next }));
     schedulePush();
   });
 
@@ -1162,7 +1118,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
   subscribe((s, prev) => {
     if (s.doc.id !== prev.doc.id || s.viewing || (s.doc.meta.project ?? '') === (prev.doc.meta.project ?? '')) return;
     projectRead++;
-    projectGeneration++;
     clearTimeout(projectTimer);
     projectTimer = window.setTimeout(() => void readProject(), 600);
   });
@@ -1171,7 +1126,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   subscribe((s, prev) => {
     if (!s.ready || s.viewing || s.doc === prev.doc || s.doc === stored || s.saving === 'conflict' || s.saving === 'gone') return;
     clearTimeout(timer);
-    if (s.saving !== 'saving') useStore.setState({ saving: 'saving' });
+    if (s.saving !== 'saving') set({ saving: 'saving' });
     timer = window.setTimeout(() => void persist(useStore.getState().doc), 500);
   });
 
@@ -1180,7 +1135,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const b = backend;
     const current = scope();
     const id = useStore.getState().doc.id;
-    if (!b || !b.assets || !current()) return dataUrl;
+    if (!b || !b.assets) return dataUrl;
     // The board's folder must exist before a picture can go into it.
     if (!useStore.getState().boards.some((b) => b.id === useStore.getState().doc.id)) await flush();
     return current() ? b.putAsset(id, dataUrl) : dataUrl;
@@ -1198,16 +1153,19 @@ export function createEditSession(options: { page?: boolean } = {}) {
 
   /** First run against the on-disk store: carry over the boards this browser was keeping. */
   async function migrate(b: Backend): Promise<void> {
-    const signal = lifetime.signal;
     if (b.mode !== 'server' || localStorage.getItem('keito:migrated')) return;
     const have = new Set((await b.list()).map((x) => x.id));
     for (const doc of localBoards()) {
       if (!active()) return;
       // One that cannot be carried over (an id the folder cannot take …) stays in the browser.
       if (!have.has(doc.id)) {
-        const next = await externalize(doc, b, signal);
-        if (!active()) return;
-        await b.save(next).catch((e) => console.warn(`[keito] ${doc.meta.title}: not carried over`, e));
+        try {
+          const next = await externalize(doc, b);
+          if (!active()) return;
+          await b.save(next);
+        } catch (e) {
+          console.warn(`[keito] ${doc.meta.title}: not carried over`, e);
+        }
       }
     }
     // The browser copies are left in place as a backup.
@@ -1220,32 +1178,23 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * hands in its own store; in a browser it is found (see connect).
    */
   async function boot(given?: Backend): Promise<void> {
-    if (disposed) return;
-    generation++;
-    opening++;
-    unwatch?.();
-    boardLifetime.abort();
-    boardLifetime = new AbortController();
+    if (!active()) return;
     const current = scope();
     try {
       const b = await connect(given, !!options.page);
       if (!active()) return;
       backend = b;
-      useStore.setState({ mode: b.mode });
       if (options.page) await migrate(b);
       if (!active()) return;
-      const [boards, presets] = await Promise.all([b.list(), b.loadPresets().catch(() => [])]);
+      let boards = await b.list();
       if (!active()) return;
-      useStore.setState({ boards, presets });
-      listen(b);
-      if (!current()) return;
       const wanted = options.page ? boardInUrl() ?? localStorage.getItem(CURRENT) : null;
       let doc = wanted ? await tryLoad(b, wanted) : null;
-      if (!current()) return;
+      if (!active()) return;
       for (const info of boards) {
         if (doc) break;
         doc = await tryLoad(b, info.id);
-        if (!current()) return;
+        if (!active()) return;
       }
       // Boards there, and none of them could be read: never taken for a first run (the sample project
       // would be written in among them). The page says so and stays empty until reloaded.
@@ -1254,30 +1203,30 @@ export function createEditSession(options: { page?: boolean } = {}) {
       if (!doc) {
         const docs = sampleBoards();
         for (const d of [...docs].reverse()) {
-          if (!current()) return;
+          if (!active()) return;
           await b.save(d);
         }
         doc = docs[0];
-        const boards = await b.list();
+        boards = await b.list();
         if (!active()) return;
-        useStore.setState({ boards });
       }
+      const presets = await b.loadPresets().catch(() => []);
+      if (!active()) return;
+      set({ boards, mode: b.mode, ready: true, presets });
+      listen(b);
       if (!current()) return;
-      useStore.setState({ ready: true });
       show(doc);
     } catch (e) {
       if (!current()) return;
       console.error(e);
-      useStore.setState({ ready: true, saving: 'error' });
+      set({ ready: true, saving: 'error' });
       void tell(`ボードを開けませんでした: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      if (active() && !useStore.getState().ready) useStore.setState({ ready: true });
     }
   }
 
   // Following a link or the back button to another board.
   onWindow('hashchange', () => {
-    const id = options.page ? boardInUrl() : null;
+    const id = boardInUrl();
     if (id && useStore.getState().ready) useStore.getState().openBoard(id);
   });
 
@@ -1305,7 +1254,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       // The history was made on the version just replaced: undoing into it would write that old
       // version back over what was saved elsewhere. It starts over from the version read in.
       const keep = (id: string) => fresh.nodes.some((n) => n.id === id) || fresh.edges.some((e) => e.id === id);
-      useStore.setState({ doc: shown, selection: s.selection.filter(keep), past: [], future: [] });
+      set({ doc: shown, selection: s.selection.filter(keep), past: [], future: [] });
     });
     pullIn();
   }
@@ -1321,7 +1270,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       void run(async (b, current) => {
         const boards = await b.list();
         if (!active()) return;
-        useStore.setState({ boards });
+        set({ boards });
         if (current()) await readProject();
       });
   });
@@ -1332,7 +1281,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
    */
   function listen(b: Backend): void {
     unwatch = b.watch?.((news) => {
-      if (disposed || backend !== b) return;
       const current = scope();
       const s = useStore.getState();
       if (news.id === s.doc.id) {
@@ -1340,7 +1288,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       } else
         void b.list().then((boards) => {
           if (!active()) return;
-          useStore.setState({ boards });
+          set({ boards });
           if (!current()) return;
           // A board of this project changed (or joined it): what is shared may have changed with it.
           const project = currentBoard().meta.project?.trim();
@@ -1442,7 +1390,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
       nodes: d.nodes.map((n) => (copies.has(n.id) ? { ...n, x: n.x + offset, y: n.y + offset } : n)),
       edges: d.edges.map((e) => (copies.has(e.id) && e.route ? { ...e, route: e.route.map((p) => ({ x: p.x + offset, y: p.y + offset })) } : e)),
     }), false);
-    s.commitOperation();
   }
 
   /**
@@ -1549,17 +1496,11 @@ export function createEditSession(options: { page?: boolean } = {}) {
 
   /** Stop without saving; callers that need a final save await flushBeforeClose first. */
   function dispose(): void {
-    if (disposed) return;
+    if (!active()) return;
+    commitOperation();
     disposed = true;
-    lifetime.abort();
-    boardLifetime.abort();
     generation++;
-    opening++;
-    projectRead++;
-    operation = null;
     operations.clear();
-    frames.forEach((id) => globalThis.cancelAnimationFrame?.(id));
-    frames.clear();
     unwatch?.();
     cleanups.splice(0).forEach((stop) => stop());
     [timer, settleTimer, retryTimer, noticeTimer, pushTimer, projectTimer].forEach(clearTimeout);
@@ -1571,7 +1512,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
   return { useStore, boot, dispose, onOperation, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align };
 }
 
-/** The page's editor, kept as the existing UI entry points. */
+/** The page's editor. */
 export const defaultSession = createEditSession({ page: true });
 export const { useStore, boot, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align } = defaultSession;
-export type EditSession = ReturnType<typeof createEditSession>;

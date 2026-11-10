@@ -33,7 +33,7 @@ function refusal(e: unknown): Error {
 }
 
 /** Each desktop connection remembers only the versions it read and wrote. */
-export function desktopBackend(): Backend {
+function desktopBackend(): Backend {
   const serials = new Map<string, number>();
   const writer = newWriter();
   const desktop: Backend = {
