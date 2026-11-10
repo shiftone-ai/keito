@@ -43,7 +43,7 @@ export function versionedDisk(boards: Doc[]) {
     assetUrl: (_, src) => src,
     fitsExitSave: () => true,
     exitSave: () => {},
-    list: async () => [...kept.values()].map(({ doc }) => ({ id: doc.id, title: doc.meta.title, project: doc.meta.project, updated: 0 })),
+    list: async () => [...kept.values()].map(({ doc }) => ({ id: doc.id, title: doc.meta.title, updated: 0, project: doc.meta.project || undefined, kind: doc.kind })),
     load: async (id) => {
       if (box.delay) await new Promise((r) => setTimeout(r, box.delay));
       const k = kept.get(id);

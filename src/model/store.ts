@@ -315,7 +315,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
         set({ view: { k, x: (width - box.w * k) / 2 - box.x * k, y: (height - box.h * k) / 2 - box.y * k } });
       },
       openBoard: (id) => void run(async (b, current) => {
-        if (id === get().doc.id) return;
+        // Opening the board on screen cancels a load still in progress (a quick click back to its tab).
+        if (id === get().doc.id) return void (loading = undefined);
         const was = get();
         const doc = await switchTo(b, id);
         if (doc === 'stayed') return showAddress(get().doc.id);
@@ -333,21 +334,27 @@ export function createEditSession(options: { page?: boolean } = {}) {
         void tell('そのボードを開けませんでした（ほかの場所で削除されたか、ファイルが読めない状態です）。');
       }),
       newBoard: (doc = emptyDoc()) => void run(async (b, current) => {
-        const ticket = ++opening;
-        if (!(await leave(b)) || !current() || ticket !== opening) return;
-        // A file opened from elsewhere may carry its pictures inline; give them a home in the board's folder.
-        // History belongs to the board it was recorded on; a copy or an opened file starts without one.
-        // An opened file may be of an older form: it is read the way a stored board is.
-        // An id the storage cannot take (a file written by hand or another tool) is given a new one.
-        // An id already taken in the storage (a board made meanwhile elsewhere, not yet in the list) is
-        // never written over: the new board takes another.
-        const taken = BOARD_ID.test(doc.id) && !!(await b.load(doc.id).catch(() => null));
-        if (!current() || ticket !== opening) return;
-        const id = BOARD_ID.test(doc.id) && !taken ? doc.id : randomId();
-        const next = await externalize(readBoard({ ...doc, id, revisions: undefined }) ?? { ...doc, id, revisions: undefined }, b);
-        if (!current() || ticket !== opening) return;
-        show(next);
-        await persist(next);
+        const request = { id: doc.id };
+        loading = request;
+        try {
+          if (!(await leave(b)) || !current() || loading !== request) return;
+          // A file opened from elsewhere may carry its pictures inline; give them a home in the board's folder.
+          // History belongs to the board it was recorded on; a copy or an opened file starts without one.
+          // An opened file may be of an older form: it is read the way a stored board is.
+          // An id the storage cannot take (a file written by hand or another tool) is given a new one.
+          // An id already taken in the storage (a board made meanwhile elsewhere, not yet in the list) is
+          // never written over: the new board takes another.
+          const taken = BOARD_ID.test(doc.id) && !!(await b.load(doc.id).catch(() => null));
+          if (!current() || loading !== request) return;
+          const id = BOARD_ID.test(doc.id) && !taken ? doc.id : randomId();
+          request.id = id;
+          const next = await externalize(readBoard({ ...doc, id, revisions: undefined }) ?? { ...doc, id, revisions: undefined }, b);
+          if (!current() || loading !== request) return;
+          show(next);
+          await persist(next);
+        } finally {
+          if (loading === request) loading = undefined;
+        }
       }),
       nameState: (name) => void run(async (b) => {
         if (get().viewing || !name.trim()) return;
@@ -533,17 +540,23 @@ export function createEditSession(options: { page?: boolean } = {}) {
         set({ boards, others: get().others.filter((d) => d.id !== id) });
         if (id !== get().doc.id) return;
         const current = scope();
-        const ticket = ++opening;
-        let next: Doc | null = null;
-        for (const info of boards) {
-          next = await tryLoad(b, info.id);
-          if (!current() || ticket !== opening) return;
-          if (next) break;
+        const request = { id };
+        loading = request;
+        try {
+          let next: Doc | null = null;
+          for (const info of boards) {
+            request.id = info.id;
+            next = await tryLoad(b, info.id);
+            if (!current() || loading !== request) return;
+            if (next) break;
+          }
+          if (next) return show(next);
+          next = emptyDoc();
+          show(next);
+          await persist(next);
+        } finally {
+          if (loading === request) loading = undefined;
         }
-        if (next) return show(next);
-        next = emptyDoc();
-        show(next);
-        await persist(next);
       }),
     };
   });
@@ -721,6 +734,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   function resetSession(doc: Doc, shown: Doc): void {
     commitOperation();
     generation++;
+    loading = undefined;
     clearTimeout(pushTimer);
     pushTimer = undefined;
     clearTimeout(projectTimer);
@@ -913,8 +927,14 @@ export function createEditSession(options: { page?: boolean } = {}) {
     return !!s.viewing || !s.ready || (s.doc === stored && s.saving !== 'conflict' && s.saving !== 'gone' && s.saving !== 'error');
   }
 
-  /** The latest request to open a board: an earlier one that finishes later is dropped. */
-  let opening = 0;
+  /**
+   * The latest request to open a board, until its load ends or is cancelled: an earlier one that
+   * finishes later is dropped.
+   */
+  let loading: { id: string } | undefined;
+
+  /** The id of the board being loaded, if any. */
+  const boardLoading = (): string | undefined => loading?.id;
 
   /** Leave the board on screen: its state kept in the history, its changes written (or let go). */
   async function leave(b: Backend): Promise<boolean> {
@@ -930,13 +950,18 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * asked for meanwhile (that one is shown, not this).
    */
   async function switchTo(b: Backend, id: string): Promise<Doc | null | 'stayed' | 'superseded'> {
-    const ticket = ++opening;
+    const request = { id };
+    loading = request;
     const current = scope();
-    const left = await leave(b);
-    if (!current() || ticket !== opening) return 'superseded';
-    if (!left) return 'stayed';
-    const doc = await tryLoad(b, id);
-    return current() && ticket === opening ? doc : 'superseded';
+    try {
+      const left = await leave(b);
+      if (!current() || loading !== request) return 'superseded';
+      if (!left) return 'stayed';
+      const doc = await tryLoad(b, id);
+      return current() && loading === request ? doc : 'superseded';
+    } finally {
+      if (loading === request) loading = undefined;
+    }
   }
 
   /**
@@ -1499,6 +1524,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     commitOperation();
     disposed = true;
     generation++;
+    loading = undefined;
     operations.clear();
     unwatch?.();
     cleanups.splice(0).forEach((stop) => stop());
@@ -1508,9 +1534,9 @@ export function createEditSession(options: { page?: boolean } = {}) {
     kept.clear();
   }
 
-  return { useStore, boot, dispose, onOperation, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align };
+  return { useStore, boot, dispose, onOperation, boardLoading, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align };
 }
 
 /** The page's editor. */
 export const defaultSession = createEditSession({ page: true });
-export const { useStore, boot, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align } = defaultSession;
+export const { useStore, boot, boardLoading, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align } = defaultSession;
