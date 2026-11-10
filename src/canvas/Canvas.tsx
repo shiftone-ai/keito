@@ -395,6 +395,8 @@ export function Canvas() {
 
   // Right-click: what is under the pointer is selected (unless it already is, with others) and a menu opens there.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  // Closed when another board opens (by a key, ⌘K or the boards list), as a click on a tab closes it.
+  useLayoutEffect(() => setMenuAt(null), [doc.id]);
   const onContextMenu = (e: RMouseEvent) => {
     e.preventDefault();
     if (inGesture() || st().editing) return;

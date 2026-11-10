@@ -71,3 +71,22 @@ describe('the next and the previous tab (⌘⇧] / ⌘⇧[)', () => {
     expect(boardBeside({ ...blank('x'), meta: { title: 'X', project: '' } }, boards, -1)).toBeUndefined();
   });
 });
+
+describe('the keys for the next and the previous tab', () => {
+  const press = (key: string, held: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}) =>
+    ({ key, ctrlKey: !!held.ctrl, metaKey: !!held.meta, shiftKey: !!held.shift, altKey: !!held.alt }) as KeyboardEvent;
+
+  it.each([
+    ['⌃Tab', 1, press('Tab', { ctrl: true })],
+    ['Ctrl+PageDown', 1, press('PageDown', { ctrl: true })],
+    ['⌃⇧Tab', -1, press('Tab', { ctrl: true, shift: true })],
+    ['Ctrl+PageUp', -1, press('PageUp', { ctrl: true })],
+    // Tab alone goes on to the next field, or to the next cell of a list.
+    ['Tab', 0, press('Tab')],
+    ['⌃⌥Tab', 0, press('Tab', { ctrl: true, alt: true })],
+    ['Ctrl+Shift+PageDown', 0, press('PageDown', { ctrl: true, shift: true })],
+  ] as const)('%s steps %i', async (_, step, e) => {
+    const { tabStep } = await import('../src/ui/tabKeys');
+    expect(tabStep(e)).toBe(step);
+  });
+});
