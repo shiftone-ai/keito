@@ -1,5 +1,6 @@
 import { sameBoard, stillIn } from '../model/history';
-import type { State, Target } from '../model/store';
+import type { State } from '../model/store';
+import type { Target } from '../model/target';
 import type { Doc, Pt } from '../model/types';
 import { ask } from '../platform/io';
 import type { SharedProject } from './client';
@@ -13,6 +14,8 @@ export interface Host {
   get(): State;
   set(change: Partial<State>): void;
   say(text: string): void;
+  /** Tell the user the board does not take what was asked of it (its `refusal`). */
+  refuse(): void;
   /** Start an operation on the board as it is (the session's checkpoint). */
   checkpoint(): void;
   /** End the operation under way. */
@@ -35,7 +38,6 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   /** Nodes moved by the operation under way: shown here, placed in the project when it ends. */
   const moved = new Map<string, Pt>();
   const stop = project.listen(refresh);
-  const refuse = (): void => host.say(COLLAB_ONLY);
 
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
     const s = project.status();
@@ -71,71 +73,72 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   }
 
   return {
-    edit(next, record) {
-      const moves = movesBetween(host.get().doc, next);
-      if (!moves) return refuse();
-      if (!moves.size) return;
-      const alone = record || !host.operating();
-      if (alone) host.checkpoint();
-      for (const [node, at] of moves) moved.set(node, at);
-      host.set({ doc: withMoves(host.get().doc, moves) });
-      if (alone) host.commitOperation();
+    edits: {
+      takes: (what) => what === 'select' || what === 'pan',
+      edit(next, record) {
+        const moves = movesBetween(host.get().doc, next);
+        if (!moves) return host.refuse();
+        if (!moves.size) return;
+        const alone = record || !host.operating();
+        if (alone) host.checkpoint();
+        for (const [node, at] of moves) moved.set(node, at);
+        host.set({ doc: withMoves(host.get().doc, moves) });
+        if (alone) host.commitOperation();
+      },
+      // Not undone by putting back a whole earlier board: that would undo others' edits too.
+      begin: () => {},
+      end: placeMoved,
+      drop() {
+        moved.clear();
+        refresh();
+        host.set({ selection: [], editing: null });
+        return true;
+      },
+      undo: host.refuse,
+      redo: host.refuse,
+      // Nothing of it is kept here: a return to it goes through its project.
+      keepSteps: () => {},
     },
-    // Not undone by putting back a whole earlier board: that would undo others' edits too.
-    begin: () => {},
-    end: placeMoved,
-    drop() {
-      moved.clear();
-      refresh();
-      host.set({ selection: [], editing: null });
-      return true;
+    saving: {
+      async flush() {
+        host.commitOperation();
+        return !project.status().pending;
+      },
+      async saveNow() {
+        host.commitOperation();
+        project.retry();
+        if (!project.status().pending) host.say('共同編集先に保存済みです（変更は自動で保存されます）');
+      },
+      async leave() {
+        const { pending } = project.status();
+        return !pending || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
+      },
+      closing: () => project.status().pending > 0,
+      // Nothing can go out as the page goes: `closing` has the browser ask about what is not stored yet.
+      exit: () => {},
+      // What fails in this machine's store says nothing of what the server has stored.
+      failed: () => {},
     },
-    undo: refuse,
-    redo: refuse,
-    takes(what) {
-      if (what === 'select' || what === 'pan') return true;
-      refuse();
-      return false;
+    boards: {
+      open(next) {
+        if (next === board) return true;
+        const doc = project.board(next);
+        if (!doc) return false;
+        host.commitOperation();
+        board = next;
+        host.set({ doc, viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
+        host.opened();
+        return true;
+      },
+      remove(id) {
+        if (!project.board(id)) return false;
+        host.refuse();
+        return true;
+      },
+      address: () => showSharedAddress(projectId),
     },
-    run: async () => refuse(),
-    open(next) {
-      if (next === board) return true;
-      const doc = project.board(next);
-      if (!doc) return false;
-      host.commitOperation();
-      board = next;
-      host.set({ doc, viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
-      host.opened();
-      return true;
-    },
-    remove(gone) {
-      if (!project.board(gone)) return false;
-      refuse();
-      return true;
-    },
-    keepImage: async (dataUrl) => dataUrl,
-    changed: () => {},
-    pickUp: () => {},
-    readProject: async () => {},
-    failed: () => {},
-    async flush() {
-      host.commitOperation();
-      return !project.status().pending;
-    },
-    async saveNow() {
-      host.commitOperation();
-      project.retry();
-      if (!project.status().pending) host.say('共同編集先に保存済みです（変更は自動で保存されます）');
-    },
-    async leave() {
-      const { pending } = project.status();
-      return !pending || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
-    },
-    // No undo steps of its own here, and a return to it goes through its project.
-    keepSteps: () => {},
-    closing: () => project.status().pending > 0,
-    gone: () => {},
-    address: () => showSharedAddress(projectId),
+    local: null,
+    refusal: COLLAB_ONLY,
     close() {
       stop();
       project.close();
