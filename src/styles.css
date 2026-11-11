@@ -1626,10 +1626,10 @@ body.row-dragging .lists td.editable:hover {
   white-space: nowrap;
 }
 .kind-badge.software {
-  background: #ea580c;
+  background: #c2410c;
 }
 .kind-badge.sequence {
-  background: #0d9488;
+  background: #0f766e;
 }
 .kind-badge.free {
   background: #64748b;
@@ -1693,10 +1693,10 @@ body.row-dragging .lists td.editable:hover {
   box-shadow: inset 0 -1px 0 #cbd5e1;
 }
 .board-tabs .board-tab.software {
-  --kind: #ea580c;
+  --kind: #c2410c;
 }
 .board-tabs .board-tab.sequence {
-  --kind: #0d9488;
+  --kind: #0f766e;
 }
 .board-tabs .board-tab.free {
   --kind: #64748b;
@@ -1805,6 +1805,7 @@ body.row-dragging .lists td.editable:hover {
   margin-bottom: 8px;
 }
 .kind-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1822,6 +1823,15 @@ body.row-dragging .lists td.editable:hover {
 .kind-card.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* Chosen shown by a mark as well as the colour; aria-pressed says it to a screen reader. */
+.kind-card.on::after {
+  content: '✓' / '';
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--accent);
+  font-weight: 700;
 }
 .new-board .row input {
   flex: 1;
