@@ -122,7 +122,8 @@ export function QuickBar() {
   const tagged = edge ? isTagged(doc, edge) : false;
   const toggle = (m: 'shape' | 'color' | 'size' | 'line') => () => setMenu(menu === m ? null : m);
   // Cables are colour-coded by type, so a new colour goes to the whole type unless told otherwise; arrows are coloured one by one.
-  const all = wide ?? (!!edge && edge.signal !== 'flow');
+  // The colour of a type is a setting of the board: where those are not taken, the colour goes to the line alone.
+  const all = (wide ?? (!!edge && edge.signal !== 'flow')) && takes('settings');
   // A colour from the picker arrives over and over while it is dragged round: one undo step for it all.
   const paint = (c: string | null, close = true) => {
     if (!close) burst();
@@ -250,7 +251,7 @@ export function QuickBar() {
             <div className="qb-menu">
               {/* Where the colour goes is settled first, before a swatch is clicked. */}
               <div className="qb-scope">
-                <button className={all ? 'on' : ''} onClick={() => setWide(true)}>
+                <button className={all ? 'on' : ''} disabled={!takes('settings')} onClick={() => setWide(true)}>
                   {signalOf(edge.signal).label} すべて
                 </button>
                 <button className={all ? '' : 'on'} onClick={() => setWide(false)}>

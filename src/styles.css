@@ -694,7 +694,7 @@ code {
   font-family: inherit;
 }
 /* A field that takes no typing here (a name on a shared board) looks as a disabled group of fields does */
-.field :is(input, textarea):disabled:not(fieldset:disabled *) {
+:is(.field, .port-row) :is(input, textarea):disabled:not(fieldset:disabled *) {
   opacity: 0.6;
 }
 .field.combo {

@@ -6,9 +6,10 @@ import type { Target } from '../model/target';
 import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
 import type { LinkRefusal, SharedProject } from './client';
-import { type NodeEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
+import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
 import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
 import { sharedTabs } from './tabs';
+import { validDrawing } from './valid';
 
 /** Said when the shared project on screen, having no board, is asked for an edit. */
 const NO_BOARD = 'この共有案件にはボードがありません';
@@ -56,7 +57,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   /** The board as the project has it, as last read: what the draft is shown on top of. */
   let base: Doc = noBoard();
   /** The edit of the operation under way: shown here, written to the project when it ends. */
-  let draft: NodeEdit = noEdit();
+  let draft: BoardEdit = noEdit();
+  /** Undoes the ids of the board on screen being made unique wherever they are made (see shareIds). */
+  let unshare = (): void => {};
   /** Set while a board is left (see put): what is heard meanwhile is shown with the board put next. */
   let switching = false;
   /** Set once the server has turned this page away: the session is leaving the project. */
@@ -96,9 +99,12 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     return !s.pending || s.device === 'saved';
   }
 
-  /** The board as shown: as the project has it, with the edit under way here on top, and each legend as tall as its rows. */
+  /**
+   * The board as shown: as the project has it, with the edit under way here on top (without the lines
+   * whose ends others took off meanwhile), and each legend as tall as its rows.
+   */
   function view(): Doc {
-    return shareIds(fitLegends(withEdit(base, draft)));
+    return fitLegends(validDrawing(withEdit(base, draft)));
   }
 
   /** Put a board on screen as the project has it now, or the project with none (''). */
@@ -114,6 +120,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     board = next;
     base = (next && project.board(next)) || noBoard();
     draft = noEdit();
+    unshare();
+    unshare = next ? shareIds(next) : () => {};
     host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
   }
 
@@ -216,6 +224,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     },
     start: tabs.start,
     close() {
+      unshare();
       stop();
       project.close();
     },
@@ -223,15 +232,18 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
 }
 
 /**
- * `next`, with the nodes that did not change kept as the objects `prev` has: read anew from the
- * project, every node is a new object, and the canvas redraws what it is handed anew.
+ * `next`, with the nodes and lines that did not change kept as the objects `prev` has: read anew from
+ * the project, every one is a new object, and the canvas redraws what it is handed anew.
  */
 function reuse(prev: Doc | null, next: Doc): Doc {
   if (!prev) return next;
-  const was = new Map(prev.nodes.map((n) => [n.id, n]));
-  const nodes = next.nodes.map((n) => {
-    const old = was.get(n.id);
-    return old && JSON.stringify(old) === JSON.stringify(n) ? old : n;
+  return { ...next, nodes: reused(prev.nodes, next.nodes), edges: reused(prev.edges, next.edges) };
+}
+
+function reused<T extends { id: string }>(prev: readonly T[], next: T[]): T[] {
+  const was = new Map(prev.map((x) => [x.id, x]));
+  return next.map((x) => {
+    const old = was.get(x.id);
+    return old && JSON.stringify(old) === JSON.stringify(x) ? old : x;
   });
-  return { ...next, nodes };
 }

@@ -254,11 +254,14 @@ export function SignalHowTo({ port }: { port?: boolean }) {
   );
 }
 
+/** A port's name: typed by hand, as a free-text Field. */
 export function PortName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const burst = useFieldBurst();
+  const takes = useTakes();
   return (
     <input
       value={value}
+      disabled={!takes('typing')}
       onFocus={burst.begin}
       onBlur={burst.end}
       onKeyDown={(e) => {
@@ -301,10 +304,11 @@ export function TextStyle({ n }: { n: Extract<Node, { type: 'shape' | 'sticky' |
   );
 }
 
-/** Add a signal type of the board's own (HDBaseT …) and hand its id back. */
+/** Add a signal type of the board's own (HDBaseT …) and hand its id back; not there where the board's settings cannot be changed. */
 export function NewSignal({ onAdd }: { onAdd: (id: string) => void }) {
   const [form, setForm] = useState<{ label: string; prefix: string; color: string } | null>(null);
   const doc = useStore((s) => s.doc);
+  const takes = useTakes();
   const custom = doc.signals ?? [];
   const st = useStore.getState;
   const inUse = (id: string): boolean => doc.edges.some((x) => x.signal === id) || doc.nodes.some((n) => n.type === 'device' && n.ports.some((p) => p.signal === id));
@@ -320,6 +324,7 @@ export function NewSignal({ onAdd }: { onAdd: (id: string) => void }) {
     onAdd(id);
     setForm(null);
   };
+  if (!takes('settings')) return null;
   if (!form) {
     return (
       <div className="signals">

@@ -22,7 +22,8 @@ export function stubPage({ realTimers = false } = {}): { listeners: Record<strin
     removeEventListener: (k: string, f: (e?: unknown) => void) => handlers.get(k)?.delete(f),
     alert: () => {}, confirm: () => true,
   });
-  vi.stubGlobal('document', { getElementById: () => null, addEventListener: () => {}, visibilityState: 'visible' });
+  // No canvas to measure text on: sizes are worked out as without a page.
+  vi.stubGlobal('document', { getElementById: () => null, addEventListener: () => {}, visibilityState: 'visible', createElement: () => ({ getContext: () => null }) });
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) });
   vi.stubGlobal('location', { hash: '', pathname: '/', search: '' });
   vi.stubGlobal('history', { replaceState: () => {} });

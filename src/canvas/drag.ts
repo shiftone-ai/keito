@@ -65,12 +65,27 @@ export function endDrag(d: Drag | null): void {
 }
 
 /**
- * Whether the node a move was grabbed by, or the node being resized, is no longer on the board:
- * taken off by someone else, on a shared board. What else a move carries may go without ending it.
+ * Whether what a drag holds is no longer on the board, taken off by someone else on a shared board:
+ * the node a move was grabbed by or the one being resized, the box or port a new line is pulled
+ * from, or the line whose end, bend or label is dragged (gone with its node or port, too). What else
+ * a move carries may go without ending it.
  */
 export function lostTarget(doc: Doc, d: Drag): boolean {
-  const id = d.kind === 'move' ? d.lead : d.kind === 'resize' ? d.id : null;
-  return id !== null && !doc.nodes.some((n) => n.id === id);
+  const gone = (id: string) => !doc.nodes.some((n) => n.id === id);
+  switch (d.kind) {
+    case 'move':
+      return gone(d.lead);
+    case 'resize':
+      return gone(d.id);
+    case 'connect':
+      return gone(d.from.node) || (!!d.from.port && !portOf(doc, d.from));
+    case 'reconnect':
+    case 'segment':
+    case 'label':
+      return !doc.edges.some((e) => e.id === d.id);
+    default:
+      return false;
+  }
 }
 
 export const portOf = (doc: Doc, end: EdgeEnd) => {

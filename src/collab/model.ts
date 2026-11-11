@@ -1,19 +1,24 @@
 import * as Y from 'yjs';
-import type { Doc, Node } from '../model/types';
-import { boardNodes, liveBoard, putBoard } from './boards';
-import { byId, nodeOf, orderOf, textOf } from './nodes';
+import type { Doc } from '../model/types';
+import { boardLines, boardNodes, liveBoard, putBoard } from './boards';
+import type { BoardEdit } from './edits';
+import { type YMap, readInOrder, textOf } from './entries';
+import { readLines, writeLines } from './lines';
+import { nodeOf, writeNodes } from './nodes';
+import { validDrawing } from './valid';
 
 /**
  * The form of a shared project's Y.Doc that this app reads and writes. A project of another form is
  * not opened (the server turns the connection away, see server/collab/server.ts).
  *
  * project:   Y.Map { id, schema, title }
- * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map> }>
+ * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map>, lines: Y.Map<line id, Y.Map> }>
  * deletions: Y.Map<mark, board id>
  *
- * See nodes.ts for a node. Which boards there are, and how one stays deleted, is boards.ts's.
+ * See nodes.ts for a node, lines.ts for a line. Which boards there are, and how one stays deleted, is
+ * boards.ts's.
  */
-export const SCHEMA = 1;
+export const SCHEMA = 2;
 
 export interface ProjectSeed {
   id: string;
@@ -56,24 +61,33 @@ export function renameProject(ydoc: Y.Doc, title: string, origin: unknown): void
 
 /**
  * A board as the drawing, the tables and the exports read it; null for one deleted, or not in the
- * project. Nodes come in their drawing order (by `order`, then id); a node of a kind this version
- * cannot show is left out rather than guessed at.
+ * project. Nodes come in their drawing order, lines in the order they were put there (each by
+ * `order`, then id); a node of a kind this version cannot show is left out rather than guessed at,
+ * and so is a line it cannot draw (see validDrawing).
  */
 export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
   const board = liveBoard(ydoc, boardId);
   if (!board) return null;
-  const listed: { order: number; node: Node }[] = [];
-  boardNodes(ydoc, boardId)?.forEach((value, id) => {
-    const node = value instanceof Y.Map ? nodeOf(id, value as Y.Map<unknown>) : null;
-    if (node) listed.push({ order: orderOf(value), node });
-  });
-  listed.sort((a, b) => a.order - b.order || byId(a.node.id, b.node.id));
-  return {
+  const nodes = boardNodes(ydoc, boardId);
+  const lines = boardLines(ydoc, boardId);
+  return validDrawing({
     version: 1,
     id: boardId,
     kind: board.kind,
     meta: { title: board.title, project: projectTitle(ydoc) },
-    nodes: listed.map((x) => x.node),
-    edges: [],
-  };
+    nodes: nodes ? readInOrder(nodes, nodeOf) : [],
+    edges: lines ? readLines(lines) : [],
+  });
+}
+
+/** What a board holds that its edits change. */
+export interface BoardParts {
+  nodes: YMap;
+  lines: YMap;
+}
+
+/** Write an edit of a board into what it holds (within the caller's transaction): see writeNodes and writeLines. */
+export function writeEdit(board: BoardParts, edit: BoardEdit): void {
+  writeNodes(board.nodes, edit);
+  writeLines(board.lines, edit.lines);
 }

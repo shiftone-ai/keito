@@ -35,20 +35,30 @@ const placeOf = async (page: Page) => ({ x: Number(await shape(page).getAttribut
 const box = (page: Page) => page.locator('#canvas rect[width="140"][height="60"]:not([fill="none"])');
 /** The colour picked in the inspector for what is selected. */
 const colour = (page: Page) => page.locator('.inspector .swatches button.on');
+type Pt = { x: number; y: number };
+/** The middle of what a locator finds, on the page. */
+async function middleOf(what: Locator): Promise<Pt> {
+  const at = (await what.boundingBox())!;
+  return { x: at.x + at.width / 2, y: at.y + at.height / 2 };
+}
 /** Click the middle of what a locator finds, as a person would: the text drawn on the board takes no clicks of its own. */
 async function clickOn(page: Page, what: Locator): Promise<void> {
-  const at = (await what.boundingBox())!;
-  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  const at = await middleOf(what);
+  await page.mouse.click(at.x, at.y);
 }
-/** Drag the shape by its middle by (dx, dy), in steps; `between` runs halfway, the button still held. */
-async function dragShape(page: Page, dx: number, dy: number, between: () => Promise<void> = async () => {}): Promise<void> {
-  const at = (await shape(page).boundingBox())!;
-  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+/** Press at `from` and let go at `to`, moving in steps; `between` runs halfway, the button still held. */
+async function drag(page: Page, from: Pt, to: Pt, between: () => Promise<void> = async () => {}): Promise<void> {
+  await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(at.x + at.width / 2 + dx / 2, at.y + at.height / 2 + dy / 2, { steps: 5 });
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
   await between();
-  await page.mouse.move(at.x + at.width / 2 + dx, at.y + at.height / 2 + dy, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
   await page.mouse.up();
+}
+/** Drag the shape by its middle by (dx, dy) (see drag). */
+async function dragShape(page: Page, dx: number, dy: number, between?: () => Promise<void>): Promise<void> {
+  const at = await middleOf(shape(page));
+  await drag(page, at, { x: at.x + dx, y: at.y + dy }, between);
 }
 
 test('two browsers share a moved shape, and it is there after the server is killed', async ({ browser }) => {
@@ -226,4 +236,82 @@ test('a shared board turns away what it does not take yet, and a board of this m
   await a.locator('.project-menu button.project-item:not(.all)').first().click();
   await expect(a.locator('.board-switch')).not.toHaveText(/共有中/);
   await expect(a.locator('.save-state')).toHaveText('フォルダに保存済み');
+});
+
+/** A device the board shows, by its name. */
+const device = (page: Page, name: string) => page.locator('#canvas').getByText(name, { exact: true });
+/** Put a device from the library on the board, (dx, dy) from the middle of the canvas. */
+async function putDevice(page: Page, name: string, dx: number, dy: number): Promise<void> {
+  await page.locator('.library-top input').fill(name);
+  const item = (await page.locator('.library .item', { has: page.locator('.label', { hasText: new RegExp(`^${name}$`) }) }).boundingBox())!;
+  const area = (await page.locator('#canvas').boundingBox())!;
+  await page.mouse.move(item.x + 20, item.y + item.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(area.x + area.width / 2 + dx, area.y + area.height / 2 + dy, { steps: 10 });
+  await page.mouse.up();
+}
+/** The lines drawn on the board: each has a wide see-through path to be grabbed by. */
+const lines = (page: Page) => page.locator('#canvas path[stroke="transparent"]');
+/**
+ * The cable list as the lists panel shows it (its head and its rows), once it lists `count` lines.
+ * The panel is closed again: it covers the lower part of the board.
+ */
+async function cables(page: Page, count: number): Promise<string[]> {
+  const panel = page.locator('.topbar-end button', { hasText: '機材・ケーブル表' });
+  await panel.click();
+  const tab = page.locator('.lists .tabs button', { hasText: 'ケーブルリスト' });
+  await tab.click();
+  await expect(tab.locator('small')).toHaveText(String(count));
+  const rows = await page.locator('.lists table tr').allInnerTexts();
+  await panel.click();
+  return rows;
+}
+/** Pull a line from the target of a port to the middle of `onto` (see drag). */
+async function pullLine(page: Page, port: Locator, onto: Locator, between?: () => Promise<void>): Promise<void> {
+  await drag(page, await middleOf(port), await middleOf(onto), between);
+}
+
+test('two browsers show the same lines and cable list, and a line pulled from a device the other takes off is not made', async ({ browser }) => {
+  const a = await openLink(browser);
+  const b = await openLink(browser);
+  const errors: string[] = [];
+  a.on('pageerror', (e) => errors.push(e.message));
+  await a.getByRole('button', { name: '機材ライブラリ' }).click();
+  await putDevice(a, 'PC', -250, 120);
+  await putDevice(a, 'プロジェクター', 250, 120);
+  await expect(device(b, 'プロジェクター')).toHaveCount(1);
+  // The PC's ports come after the shape's (none) and in its own order: LAN, USB, AC, then HDMI 1, HDMI 2.
+  const output = (page: Page, i: number) => page.locator('#canvas circle.port-hit').nth(3 + i);
+
+  await pullLine(a, output(a, 0), device(a, 'プロジェクター'));
+  await expect(lines(b)).toHaveCount(1);
+  await expect(a.locator('.save-state')).toHaveText('共同編集先に保存済み');
+  const listed = await cables(a, 1);
+  expect(listed.join('\n')).toMatch(/PC\tHDMI 1\tプロジェクター\tHDMI/);
+  expect(await cables(b, 1)).toEqual(listed);
+
+  // A colour picked for the line just made goes to that line: the colour of all lines of its type is a setting of the board.
+  await a.locator('.inspector .line-colors button[aria-label="#dc2626"]').click();
+  await expect(b.locator('#canvas path[stroke="#dc2626"]')).toHaveCount(1);
+  await a.locator('.quickbar button[data-tip="線の色"]').click();
+  await a.locator('.quickbar .qb-swatches button[aria-label="#16a34a"]').click();
+  await expect(b.locator('#canvas path[stroke="#16a34a"]')).toHaveCount(1);
+
+  // Pulled from the PC while the other browser takes the PC off.
+  await pullLine(a, output(a, 1), device(a, 'プロジェクター'), async () => {
+    await clickOn(b, device(b, 'PC'));
+    await b.keyboard.press('Delete');
+    await expect(device(a, 'PC')).toHaveCount(0);
+  });
+  for (const page of [a, b]) await expect(page.locator('.save-state')).toHaveText('共同編集先に保存済み');
+  for (const page of [a, b]) await expect(lines(page)).toHaveCount(0);
+  expect(await cables(b, 0)).toEqual(await cables(a, 0));
+  // Put back: with the line it had, and no line pulled from it while it was gone.
+  await b.keyboard.press('ControlOrMeta+z');
+  await expect(device(a, 'PC')).toHaveCount(1);
+  await expect(b.locator('.save-state')).toHaveText('共同編集先に保存済み');
+  for (const page of [a, b]) await expect(lines(page)).toHaveCount(1);
+  expect(await cables(a, 1)).toEqual(listed);
+  expect(await cables(b, 1)).toEqual(listed);
+  expect(errors).toEqual([]);
 });

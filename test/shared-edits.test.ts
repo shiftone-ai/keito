@@ -1,9 +1,11 @@
 import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSeed } from '../src/collab/model';
+import { center, nodeRect } from '../src/model/geometry';
 import { allIds, freshId } from '../src/model/ids';
+import { cableTable } from '../src/model/lists';
 import { JUNCTION, makeDevice, makeLegend, makeNode, presetOf } from '../src/model/presets';
-import type { DeviceNode, Doc, Node } from '../src/model/types';
+import type { DeviceNode, Doc, EdgeEnd, Node, Pt } from '../src/model/types';
 import { type RunningServer, seedData, startServer, until } from './collab';
 import { blank } from './helpers';
 import { stubPage, versionedDisk } from './page';
@@ -249,5 +251,187 @@ describe('basic edits of a shared board', () => {
 
     const c = await afterRestart();
     expect(ids(c.s().doc)).toEqual([]);
+  });
+});
+
+type Editor = Awaited<ReturnType<typeof editor>>;
+
+/** How the canvas plans a line: loaded once the page is stubbed, as the store it reads is. */
+let plans: typeof import('../src/canvas/connect');
+
+/** The middle of a node as the editor sees it: a line let go there lands on the node's body. */
+const middle = (x: Editor, id: string): Pt => center(nodeRect(x.node(id)!));
+
+/** Pull a line from `from` and let go on the body of `onto`, as the canvas does. Returns the line's id. */
+function connect(x: Editor, from: EdgeEnd, onto: string): string {
+  const at = { x: 0, y: 0 };
+  const plan = plans.planConnect(x.s().doc, { kind: 'connect', from, at, sx: 0, sy: 0, trail: [at] }, middle(x, onto), 1);
+  if (!plan) throw new Error(`no line from ${from.node} onto ${onto}`);
+  x.s().setDoc(plan.doc);
+  return plan.edge;
+}
+
+/** Drag one end of a line onto the body of `onto`, as the canvas does. */
+function reconnect(x: Editor, id: string, end: 'from' | 'to', onto: string): void {
+  const plan = plans.planReconnect(x.s().doc, { kind: 'reconnect', id, end, other: { x: 0, y: 0 } }, middle(x, onto), 1);
+  if (!plan) throw new Error(`no end of ${id} onto ${onto}`);
+  x.s().setDoc(plan.doc);
+}
+
+/** Take a port off a device as the inspector does: with the lines on it, in one step. */
+function removePort(x: Editor, device: string, name: string): void {
+  const { port: id } = portOf(x, device, name);
+  const on = (end: EdgeEnd) => end.node === device && end.port === id;
+  x.s().mutate((d) => ({
+    ...d,
+    nodes: d.nodes.map((n) => (n.id === device && n.type === 'device' ? { ...n, ports: n.ports.filter((p) => p.id !== id) } : n)),
+    edges: d.edges.filter((e) => !on(e.from) && !on(e.to)),
+  }));
+}
+
+/** A device's port by its name, as an end of a line. */
+function portOf(x: Editor, device: string, name: string): EdgeEnd {
+  const port = (x.node(device) as DeviceNode).ports.find((p) => p.name === name);
+  if (!port) throw new Error(`no port ${name} on ${device}`);
+  return { node: device, port: port.id };
+}
+
+const line = (x: Editor, id: string) => x.s().doc.edges.find((e) => e.id === id);
+const lineIds = (x: Editor) => x.s().doc.edges.map((e) => e.id);
+
+/** Wait until what `from` has sent is on `to`: an edit made after it is seen there (one connection carries both, in order). */
+async function caughtUp(from: Editor, to: Editor): Promise<void> {
+  const mark = colorOf(from.node(shape())) === 'green' ? 'blue' : 'green';
+  from.s().updateNode(shape(), { color: mark });
+  await until(() => colorOf(to.node(shape())) === mark, 5_000, 'the other editor to catch up');
+}
+
+describe('lines and ports of a shared board', () => {
+  beforeEach(async () => {
+    plans = await import('../src/canvas/connect');
+  });
+
+  /** Two PCs, an LED wall (no video input of its own), a converter and a projector, put on the board by `a` and seen by `b`. */
+  async function rack(a: Editor, b: Editor) {
+    const put = (key: string, x: number, y: number) => a.add((t) => makeDevice(presetOf(key)!, x, y, t)).id;
+    const r = { pc1: put('pc', 0, 300), pc2: put('pc', 0, 700), led: put('led', 600, 300), conv: put('conv', 600, 700), pj: put('pj', 600, 1100) };
+    await until(() => Object.values(r).every((id) => !!b.node(id)), 5_000, 'the devices to reach the other editor');
+    return r;
+  }
+
+  it('keeps both lines two editors connect to one device at once, each into a port of its own, through a killed server', async () => {
+    const a = await editor();
+    const b = await editor();
+    const r = await rack(a, b);
+    // The LED wall has no video input: each line makes one on it.
+    const mine = connect(a, portOf(a, r.pc1, 'HDMI 1'), r.led);
+    const theirs = connect(b, portOf(b, r.pc2, 'HDMI 1'), r.led);
+    for (const x of [a, b]) await until(() => !!line(x, mine) && !!line(x, theirs), 5_000, 'both lines on each editor');
+    await a.stored();
+    await b.stored();
+
+    const inputs = (a.node(r.led) as DeviceNode).ports.filter((p) => p.signal === 'video').map((p) => p.id);
+    expect(inputs).toHaveLength(2);
+    expect([line(a, mine)!.to, line(a, theirs)!.to].map((end) => end.port).sort()).toEqual([...inputs].sort());
+    expect(line(a, mine)!.from).toEqual(portOf(a, r.pc1, 'HDMI 1'));
+    expect(line(a, theirs)!.from).toEqual(portOf(a, r.pc2, 'HDMI 1'));
+    expect(b.s().doc.nodes).toEqual(a.s().doc.nodes);
+    expect(b.s().doc.edges).toEqual(a.s().doc.edges);
+
+    const c = await afterRestart();
+    expect(c.s().doc.nodes).toEqual(a.s().doc.nodes);
+    expect(c.s().doc.edges).toEqual(a.s().doc.edges);
+  });
+
+  it('keeps a line one editor pulls onto another device and the cable details the other changes at once', async () => {
+    const a = await editor();
+    const b = await editor();
+    const r = await rack(a, b);
+    const id = connect(a, portOf(a, r.pc1, 'HDMI 1'), r.conv);
+    await until(() => !!line(b, id), 5_000, 'the line to reach the other editor');
+
+    reconnect(a, id, 'from', r.pc2);
+    b.s().updateEdge(id, { cableId: 'V-01', length: 15 });
+
+    for (const x of [a, b]) await until(() => line(x, id)?.from.node === r.pc2 && line(x, id)?.cableId === 'V-01', 5_000, 'both changes on each editor');
+    expect(line(a, id)).toMatchObject({ from: portOf(a, r.pc2, 'HDMI 1'), to: portOf(a, r.conv, 'SDI IN'), cableId: 'V-01', length: 15 });
+    expect(line(b, id)).toEqual(line(a, id));
+  });
+
+  it('ends with the two ends one editor gave a line that both pull at once, never one end from each', async () => {
+    const a = await editor();
+    const b = await editor();
+    const r = await rack(a, b);
+    const id = connect(a, portOf(a, r.pc1, 'HDMI 1'), r.conv);
+    await until(() => !!line(b, id), 5_000, 'the line to reach the other editor');
+
+    reconnect(a, id, 'from', r.pc2);
+    reconnect(b, id, 'to', r.pj);
+    await a.stored();
+    await b.stored();
+    await caughtUp(a, b);
+    await caughtUp(b, a);
+
+    expect(line(b, id)).toEqual(line(a, id));
+    expect([
+      [r.pc2, r.conv],
+      [r.pc1, r.pj],
+    ]).toContainEqual([line(a, id)!.from.node, line(a, id)!.to.node]);
+  });
+
+  it('leaves a line to a device or a port the other editor takes off as it is connected out of the board and the cable table alike, through a killed server', async () => {
+    const a = await editor();
+    const b = await editor();
+    const r = await rack(a, b);
+    const kept = connect(a, portOf(a, r.pc1, 'HDMI 1'), r.pj);
+    await until(() => !!line(b, kept), 5_000, 'the line to reach the other editor');
+
+    // At once: one takes the LED wall and the converter's input off, the other connects a line to each.
+    a.s().removeIds([r.led]);
+    removePort(a, r.conv, 'SDI IN');
+    connect(b, portOf(b, r.pc2, 'HDMI 1'), r.led);
+    connect(b, portOf(b, r.pc2, 'HDMI 2'), r.conv);
+    await a.stored();
+    await b.stored();
+    await caughtUp(a, b);
+    await caughtUp(b, a);
+
+    for (const x of [a, b]) {
+      expect(x.node(r.led)).toBeUndefined();
+      expect((x.node(r.conv) as DeviceNode).ports.map((p) => p.name)).not.toContain('SDI IN');
+      expect(lineIds(x)).toEqual([kept]);
+    }
+    expect(cableTable(a.s().doc).rows.at(-1)).toContain('合計 1 本');
+    expect(cableTable(b.s().doc)).toEqual(cableTable(a.s().doc));
+
+    const c = await afterRestart();
+    expect(c.s().doc.edges).toEqual(a.s().doc.edges);
+    expect(cableTable(c.s().doc)).toEqual(cableTable(a.s().doc));
+  });
+
+  it("undoes this editor's own wiring one operation at a time, keeping the other editor's lines, through a killed server", async () => {
+    const a = await editor();
+    const b = await editor();
+    const r = await rack(a, b);
+    const mine = connect(a, portOf(a, r.pc1, 'HDMI 1'), r.conv);
+    const theirs = connect(b, portOf(b, r.pc2, 'HDMI 1'), r.pj);
+    for (const x of [a, b]) await until(() => !!line(x, mine) && !!line(x, theirs), 5_000, 'both lines on each editor');
+
+    a.s().undo();
+    expect(lineIds(a)).toEqual([theirs]);
+    a.s().redo();
+    expect(lineIds(a).sort()).toEqual([mine, theirs].sort());
+    // A device goes with its lines, and comes back with them.
+    const was = line(a, mine);
+    a.s().removeIds([r.pc1]);
+    expect(lineIds(a)).toEqual([theirs]);
+    a.s().undo();
+    expect(line(a, mine)).toEqual(was);
+    await until(() => !!b.node(r.pc1) && !!line(b, mine), 5_000, 'the undo to reach the other editor');
+    expect(line(b, theirs)).toBeDefined();
+    await a.stored();
+
+    const c = await afterRestart();
+    expect(c.s().doc.edges).toEqual(a.s().doc.edges);
   });
 });
