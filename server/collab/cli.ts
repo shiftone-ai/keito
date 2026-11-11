@@ -6,6 +6,8 @@
  *   init <案件名> [--board <ボード名>]            make a shared project (one board, one shape)
  *   grant <案件 id>                              make an editor's credential for the project
  *         [--server ws://…] [--app http://…]    … and print the link that joins it
+ *   delete <案件 id>                             delete the project (its clients are let go)
+ *   restore <案件 id>                            bring a deleted project back as it was
  *
  * Every command takes --data <folder> (default: $KEITO_COLLAB_DATA, else ./collab-data), the
  * folder holding the SQLite file.
@@ -61,14 +63,30 @@ if (command === 'serve') {
   store.close();
   console.log(`案件を作りました: ${seed.title}\nproject: ${seed.id}\nboard: ${seed.board.id}`);
 } else if (command === 'grant') {
-  if (!arg) fail('案件 id を指定してください: grant <案件 id>');
-  if (store.projectSchema(arg) === null) fail(`案件 ${arg} はありません（init で作った案件の id を指定してください）`);
-  const { id, token } = store.addGrant(arg);
+  const id = project(arg);
+  const grant = store.addGrant(id);
   store.close();
-  console.log(`編集の権限を作りました: ${id}\ntoken: ${token}`);
-  if (values.server && values.app) console.log(`参加リンク: ${joinLink(values.app, values.server, arg, token)}`);
+  console.log(`編集の権限を作りました: ${grant.id}\ntoken: ${grant.token}`);
+  if (values.server && values.app) console.log(`参加リンク: ${joinLink(values.app, values.server, id, grant.token)}`);
+} else if (command === 'delete') {
+  const id = project(arg);
+  if (!store.deleteProject(id)) fail(`案件 ${id} は削除済みです`);
+  store.close();
+  console.log(`案件を削除しました: ${id}\n（restore ${id} で元に戻せます）`);
+} else if (command === 'restore') {
+  const id = project(arg);
+  if (!store.restoreProject(id)) fail(`案件 ${id} は削除されていません`);
+  store.close();
+  console.log(`案件を元に戻しました: ${id}`);
 } else {
-  fail('使い方: npm run collab -- serve | init <案件名> | grant <案件 id>');
+  fail('使い方: npm run collab -- serve | init <案件名> | grant <案件 id> | delete <案件 id> | restore <案件 id>');
+}
+
+/** The project id given to a command, once it is known to be one that `init` made. */
+function project(id: string | undefined): string {
+  if (!id) fail(`案件 id を指定してください: ${command} <案件 id>`);
+  if (store.projectSchema(id) === null) fail(`案件 ${id} はありません（init で作った案件の id を指定してください）`);
+  return id;
 }
 
 /** The link that opens the project in the app (src/collab/join.ts reads it). */
