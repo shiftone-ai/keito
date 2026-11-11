@@ -97,8 +97,12 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
   // Nobody may be waiting on it (a connection closed before it synced).
   ready.catch(() => {});
 
-  /** The copy kept on this device; another schema's is a copy of its own, left as it is. */
-  const copy = keepCopy(device, `${join.project}/${SCHEMA}`, () => ({ state: Y.encodeStateAsUpdate(ydoc), pending: new Map(pending) }), notify);
+  /**
+   * The copy kept on this device, one per project, schema and server: a link to the project on
+   * another server (an id is no secret) neither opens it nor sends its edits there. Another schema's
+   * or server's is a copy of its own, left as it is.
+   */
+  const copy = keepCopy(device, `${join.project}/${SCHEMA}@${join.server}`, () => ({ state: Y.encodeStateAsUpdate(ydoc), pending: new Map(pending) }), notify);
   /** The copy kept here, as it is put in the Y.Doc: not an edit of this client, nor a change to keep. */
   const fromDevice = Symbol('kept on this device');
   let provider: HocuspocusProvider | null = null;

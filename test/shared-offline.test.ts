@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type CollabStore, openStore } from '../server/collab/store';
@@ -112,6 +113,33 @@ describe('a shared project kept on this device', () => {
     await b.stored(15_000);
     const c = await editor();
     expect(c.s().doc.nodes.map((n) => [n.id, n.x, n.y])).toEqual([[seed.shape.id, 300, 40]]);
+  });
+
+  it('is not opened from a link to another server, nor are its unsent edits sent there', async () => {
+    const device = memoryDevice();
+    const a = await editor({ device: device.store });
+    a.drag(seed.shape.id, 240, 120);
+    await a.stored();
+    await server.kill();
+    await a.offline();
+    a.drag(seed.shape.id, 300, 40);
+    await until(() => a.s().collab?.device === 'saved' && a.s().collab?.pending === 1, 5_000, 'the edit to be kept on this device');
+    a.session.dispose();
+    // Another server holding a project of the same id, and taking the same credential.
+    const other = mkdtempSync(join(tmpdir(), 'keito-collab-other-'));
+    cpSync(data, other, { recursive: true });
+    const elsewhere = await startServer(other);
+    try {
+      const b = await editor({ device: device.store, url: elsewhere.url });
+      await b.stored();
+      expect(at(b.node(seed.shape.id))).toEqual({ x: 240, y: 120 });
+      b.session.dispose();
+      const c = await editor({ url: elsewhere.url });
+      expect(at(c.node(seed.shape.id))).toEqual({ x: 240, y: 120 });
+    } finally {
+      await elsewhere.kill();
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('is not opened offline once the server last turned this device away', async () => {
