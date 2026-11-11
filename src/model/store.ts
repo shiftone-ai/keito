@@ -317,6 +317,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
       openBoard: (id) => void run(async (b, current) => {
         // Opening the board on screen cancels a load still in progress (a quick click back to its tab).
         if (id === get().doc.id) return void (loading = undefined);
+        // The board still loading, asked for again (a key held down, a tab clicked twice): its load goes on.
+        if (id === loading?.id) return;
         const was = get();
         const doc = await switchTo(b, id);
         if (doc === 'stayed') return showAddress(get().doc.id);
