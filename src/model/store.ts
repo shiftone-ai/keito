@@ -314,27 +314,19 @@ export function createEditSession(options: { page?: boolean } = {}) {
         const k = Math.min(1.25, (width - 120) / Math.max(1, box.w), (height - 120) / Math.max(1, box.h));
         set({ view: { k, x: (width - box.w * k) / 2 - box.x * k, y: (height - box.h * k) / 2 - box.y * k } });
       },
-      openBoard: (id) => void run(async (b, current) => {
-        // Opening the board on screen cancels a load still in progress (a quick click back to its tab).
+      openBoard: (id) => {
+        // Not a no-op: a load still under way would put another board over this one, which a quick
+        // click back to its tab no longer wants.
         if (id === get().doc.id) return void (loading = undefined);
-        // The board still loading, asked for again (a key held down, a tab clicked twice): its load goes on.
+        // Not started over: a new request supersedes the load under way, so a key held down would
+        // keep the board from opening.
         if (id === loading?.id) return;
-        const was = get();
-        const doc = await switchTo(b, id);
-        if (doc === 'stayed') return showAddress(get().doc.id);
-        if (doc === 'superseded') return;
-        if (doc) {
-          if (!was.viewing) kept.set(was.doc.id, { past: was.past, future: was.future, view: was.view, print: fingerprint(was.doc) });
-          return show(doc);
-        }
-        // Deleted elsewhere (another tab, the command line), or its file broken: the list follows.
-        const boards = await b.list();
-        if (!active()) return;
-        set({ boards });
-        if (!current()) return;
-        showAddress(get().doc.id);
-        void tell('そのボードを開けませんでした（ほかの場所で削除されたか、ファイルが読めない状態です）。');
-      }),
+        void run(async (b, current) => {
+          const result = await switchTo(b, id);
+          if (result === 'stayed') showAddress(get().doc.id);
+          else if (result === 'unreadable') await reportUnreadable(b, current);
+        });
+      },
       newBoard: (doc = emptyDoc()) => void run(async (b, current) => {
         const request = { id: doc.id };
         loading = request;
@@ -523,11 +515,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         }),
       openAt: (boardId, nodeId) =>
         void run(async (b) => {
-          if (boardId !== get().doc.id) {
-            const doc = await switchTo(b, boardId);
-            if (!doc || doc === 'stayed' || doc === 'superseded') return;
-            show(doc);
-          }
+          if (boardId !== get().doc.id && (await switchTo(b, boardId)) !== 'shown') return;
           set({ selection: [nodeId] });
           // After the board has been fitted to the window: the node, in the middle.
           frame(() => frame(() => centerOn(nodeId)));
@@ -947,23 +935,40 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   /**
-   * Leave the board on screen for another and read that one in: the board, or null when it cannot
-   * be read; 'stayed' when the user kept the one on screen, 'superseded' when another board was
-   * asked for meanwhile (that one is shown, not this).
+   * Leave the board on screen for another and show that one, the board left keeping its undo steps
+   * and view for a return to it: 'shown'; 'stayed' when the user kept the one on screen;
+   * 'superseded' when another board was asked for meanwhile (that one is shown, not this);
+   * 'unreadable' when it cannot be read.
    */
-  async function switchTo(b: Backend, id: string): Promise<Doc | null | 'stayed' | 'superseded'> {
+  async function switchTo(b: Backend, id: string): Promise<'shown' | 'stayed' | 'superseded' | 'unreadable'> {
+    const was = useStore.getState();
     const request = { id };
     loading = request;
     const current = scope();
+    const superseded = () => !current() || loading !== request;
     try {
       const left = await leave(b);
-      if (!current() || loading !== request) return 'superseded';
+      if (superseded()) return 'superseded';
       if (!left) return 'stayed';
       const doc = await tryLoad(b, id);
-      return current() && loading === request ? doc : 'superseded';
+      if (superseded()) return 'superseded';
+      if (!doc) return 'unreadable';
+      if (!was.viewing) kept.set(was.doc.id, { past: was.past, future: was.future, view: was.view, print: fingerprint(was.doc) });
+      show(doc);
+      return 'shown';
     } finally {
       if (loading === request) loading = undefined;
     }
+  }
+
+  /** A board that could not be read (deleted elsewhere, or its file broken): the list follows, and the user is told. */
+  async function reportUnreadable(b: Backend, current: () => boolean): Promise<void> {
+    const boards = await b.list();
+    if (!active()) return;
+    set({ boards });
+    if (!current()) return;
+    showAddress(useStore.getState().doc.id);
+    void tell('そのボードを開けませんでした（ほかの場所で削除されたか、ファイルが読めない状態です）。');
   }
 
   /**
