@@ -99,6 +99,15 @@ describe('the next and the previous tab (⌘⇧] / ⌘⇧[)', () => {
     expect(boardBeside(open('b'), boards, -1)).toBe('free');
   });
 
+  it('goes along the boards of a shared project, and none of this machine of the same project name', async () => {
+    const { boardBeside } = await import('../src/ui/BoardTabs');
+    const shared = [{ id: 's1', title: '配置' }, { id: 's2', title: '配線' }];
+    const here: Doc = { ...blank('s1'), meta: { title: '配置', project: 'P' } };
+    expect(boardBeside(here, boards, 1, undefined, shared)).toBe('s2');
+    expect(boardBeside(here, boards, -1, undefined, shared)).toBe('s2');
+    expect(boardBeside(here, boards, 1, undefined, [shared[0]])).toBeUndefined();
+  });
+
   it('goes nowhere from a board alone in its project, or in none', async () => {
     const { boardBeside } = await import('../src/ui/BoardTabs');
     expect(boardBeside(open('other'), boards, 1)).toBeUndefined();

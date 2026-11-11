@@ -6,6 +6,12 @@ const ADDRESS = /^#\/s\/([\w-]+)(?:\?(.*))?$/;
 /** The address (hash) that opens a shared project. */
 export const sharedAddress = (project: string): string => `#/s/${project}`;
 
+/** Put a shared project's address in the URL, in place of the one there (no new history entry). */
+export function showSharedAddress(project: string): void {
+  const address = sharedAddress(project);
+  if (location.hash !== address) history.replaceState(null, '', `${location.pathname}${location.search}${address}`);
+}
+
 /**
  * The shared project the address names (#/s/<project>), with what joins it. A join link carries the
  * server and the credential (#/s/<project>?server=…&token=…): they are kept in this browser and taken
@@ -21,7 +27,7 @@ export function joinInAddress(): SharedJoin | null {
   const token = given.get('token');
   if (server && token) {
     localStorage.setItem(kept(project), JSON.stringify({ server, token }));
-    history.replaceState(null, '', `${location.pathname}${location.search}${sharedAddress(project)}`);
+    showSharedAddress(project);
   }
   try {
     const v: unknown = JSON.parse(localStorage.getItem(kept(project)) ?? 'null');

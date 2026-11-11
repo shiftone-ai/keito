@@ -79,7 +79,7 @@ export function ProjectMenu() {
       })
       .sort((a, b) => b.at - a.at || b.updated - a.updated);
   }, [open, boards, mine, doc.id, collab]);
-  const here = collab ? 1 : boards.filter((b) => (b.project?.trim() ?? '') === mine && b.id !== doc.id).length + 1;
+  const here = collab ? collab.boards.length : boards.filter((b) => (b.project?.trim() ?? '') === mine && b.id !== doc.id).length + 1;
   const name = collab ? `${label(mine)}（共有中）` : label(mine);
 
   const go = (board: string) => {

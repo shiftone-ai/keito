@@ -224,6 +224,14 @@ describe('a shared project', () => {
     expect(c.s().doc).toEqual(before);
   });
 
+  it('takes its tabs from the project, never from the boards of this machine with the same project name', async () => {
+    const { boardAt } = await import('../src/ui/BoardTabs');
+    const a = await editor();
+    expect(a.s().boards.map((b) => b.project)).toContain(seed.title);
+    expect(a.s().collab?.boards.map((b) => b.id)).toEqual([seed.board.id]);
+    expect(boardAt(a.s().doc, a.s().boards, -1, a.s().collab?.boards)).toBe(seed.board.id);
+  });
+
   it('lets go of the connection when a local board is opened, and saves that board as before', async () => {
     const a = await editor();
     const b = await editor();

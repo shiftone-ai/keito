@@ -11,23 +11,26 @@ export function tabOrder<T extends { kind?: Doc['kind']; title: string }>(list: 
   return [...list].sort((a, b) => rank(a.kind) - rank(b.kind) || a.title.localeCompare(b.title, 'ja', { numeric: true }));
 }
 
+/** A board of the open board's project, as its tab shows it. */
+type Tab = Pick<BoardInfo, 'id' | 'title' | 'kind'>;
+
 /**
  * The open board's project as tabs (the open board as it is now, its title or kind just edited
- * included). A shared board is its only tab: a board of this machine is never one of a shared
- * project's, whatever its project is named.
+ * included). A shared project's tabs are its own boards (`shared`, see CollabState): a board of this
+ * machine is never one of them, whatever its project is named.
  */
-function projectTabs(doc: Doc, boards: BoardInfo[], shared = false): BoardInfo[] {
+function projectTabs(doc: Doc, boards: BoardInfo[], shared?: readonly Tab[]): Tab[] {
   const project = doc.meta.project?.trim();
-  const here: BoardInfo = { id: doc.id, title: doc.meta.title, updated: Date.now(), project: doc.meta.project || undefined, kind: doc.kind };
-  if (!project || shared) return [here];
-  return tabOrder([here, ...boards.filter((b) => b.id !== doc.id && (b.project ?? '').trim() === project)]);
+  const here: Tab = { id: doc.id, title: doc.meta.title, kind: doc.kind };
+  const fellows = shared ?? (project ? boards.filter((b) => (b.project ?? '').trim() === project) : []);
+  return tabOrder([here, ...fellows.filter((b) => b.id !== doc.id)]);
 }
 
 /** projectTabs for the store's open board, re-rendered as it or the boards change. */
-export function useProjectTabs(): BoardInfo[] {
+export function useProjectTabs(): Tab[] {
   const doc = useStore((s) => s.doc);
   const boards = useStore((s) => s.boards);
-  const shared = useStore((s) => !!s.collab);
+  const shared = useStore((s) => s.collab?.boards);
   return projectTabs(doc, boards, shared);
 }
 
@@ -36,7 +39,7 @@ export function useProjectTabs(): BoardInfo[] {
  * `from` is not one of them; past either end, it wraps round. Undefined when the open board's project
  * has only one tab.
  */
-export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1, from?: string, shared = false): string | undefined {
+export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1, from?: string, shared?: readonly Tab[]): string | undefined {
   const tabs = projectTabs(doc, boards, shared);
   if (tabs.length < 2) return undefined;
   const at = tabs.findIndex((b) => b.id === from);
@@ -45,7 +48,7 @@ export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1, from?: 
 }
 
 /** The id of the tab at `place` from the left, counted from 0 (−1: the last), or undefined past the last tab. */
-export function boardAt(doc: Doc, boards: BoardInfo[], place: number, shared = false): string | undefined {
+export function boardAt(doc: Doc, boards: BoardInfo[], place: number, shared?: readonly Tab[]): string | undefined {
   return projectTabs(doc, boards, shared).at(place)?.id;
 }
 
