@@ -65,18 +65,24 @@ function SharedSaveState({ collab, saving, saveError, project }: { collab: Colla
   const { pending, link, device, unkept } = collab;
   const shared = `共有中の案件「${project}」（試験中: ${SHARED_SO_FAR}を共有します）`;
   const [text, tip] = unkept
-    ? ['本端末に保存できていません', `未送信の ${pending} 件は、閉じると失われます（${saveError ?? '理由は不明'}）`]
+    ? ['本端末に保存できていません', saveError ?? '理由は不明']
     : saving === 'error'
       ? ['共同編集先に保存できていません', `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。`]
       : pending && link !== 'online'
         ? [`オフライン・未送信 ${pending} 件`, shared]
         : [pending ? '共同編集先に保存中…' : link !== 'online' ? 'オフライン' : '共同編集先に保存済み', shared];
-  // Not said while the server is storing the edits as usual: the line would come and go with each edit.
-  const kept = pending > 0 && device === 'saved' && (saving === 'error' || link !== 'online');
+  const note = unkept
+    ? `閉じると未送信の ${pending} 件が失われます`
+    : // Not said while the server is storing the edits as usual: the line would come and go with each edit.
+      pending > 0 && device === 'saved' && (saving === 'error' || link !== 'online')
+      ? '本端末に保存済み'
+      : null;
   return (
     <span className={`save-state ${saving}`} title={tip}>
-      {text}
-      {kept && <small>本端末に保存済み</small>}
+      <span>
+        {text}
+        {note && <small>{note}</small>}
+      </span>
       {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
     </span>
   );
