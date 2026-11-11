@@ -1,5 +1,5 @@
 import type { ShareStatus, SharedJoin } from '../collab/client';
-import type { SharedBoardInfo } from '../collab/model';
+import type { SharedBoardInfo } from '../collab/boards';
 import { sharedTarget } from '../collab/target';
 import { localEdits } from './edits';
 import { fitLegends } from './legend';
