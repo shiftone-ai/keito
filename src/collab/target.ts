@@ -1,14 +1,17 @@
 import { sameBoard, stillIn } from '../model/history';
 import { fitLegends } from '../model/legend';
 import { shareIds } from '../model/ids';
-import type { State } from '../model/store';
+import type { State, View } from '../model/store';
 import type { Target } from '../model/target';
 import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
-import type { SharedProject } from './client';
+import type { LinkRefusal, SharedProject } from './client';
 import { type NodeEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
-import { showSharedAddress } from './join';
-import { NOT_TAKEN, sharedTakes } from './scope';
+import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
+import { sharedTabs } from './tabs';
+
+/** Said when the shared project on screen, having no board, is asked for an edit. */
+const NO_BOARD = 'この共有案件にはボードがありません';
 
 /** What the target of a shared board needs of the edit session it is the target of. */
 export interface Host {
@@ -23,8 +26,19 @@ export interface Host {
   commitOperation(): void;
   /** Whether an operation is under way. */
   operating(): boolean;
-  /** A board has been put on screen: its address shown, and the board fitted to the window. */
-  opened(): void;
+  /** A board has been put on screen: its address shown, and the board on `view`, or fitted to the window (undefined). */
+  opened(view: View | undefined): void;
+  /**
+   * The server turned this page away while it had the project open (the project deleted …): the
+   * session leaves it, telling the user why.
+   */
+  refused(refusal: LinkRefusal): void;
+}
+
+/** The target of a shared project's board, and what puts the project on screen in the first place. */
+export interface SharedTarget extends Target {
+  /** Put the project on screen: on the board last shown on this machine, else the first tab, else none. */
+  start(): void;
 }
 
 /**
@@ -33,21 +47,39 @@ export interface Host {
  * project as one edit when its operation ends, and undo takes back this page's own edits only. The
  * collaboration server stores them, and `saving` says whether it has. It holds nothing of this
  * machine's store: the board can neither be written there nor take part in what is kept there
- * (history, other boards, pictures).
+ * (history, other boards, pictures). Which of the project's boards is on screen, and managing them,
+ * is tabs.ts's.
  */
-export function sharedTarget(projectId: string, project: SharedProject, host: Host): Target {
-  /** The board of the project on screen (see open). */
+export function sharedTarget(projectId: string, project: SharedProject, host: Host): SharedTarget {
+  /** The board of the project on screen (see put); '' for none, the project having no board. */
   let board = '';
   /** The board as the project has it, as last read: what the draft is shown on top of. */
-  let base: Doc | null = null;
+  let base: Doc = noBoard();
   /** The edit of the operation under way: shown here, written to the project when it ends. */
   let draft: NodeEdit = noEdit();
+  /** Set while a board is left (see put): what is heard meanwhile is shown with the board put next. */
+  let switching = false;
+  /** Set once the server has turned this page away: the session is leaving the project. */
+  let leaving = false;
+  const takes = (what: EditKind): boolean => (board ? sharedTakes(what) : emptyTakes(what));
+  const tabs = sharedTabs(projectId, project, {
+    shown: () => board,
+    put,
+    view: () => host.get().view,
+    opened: host.opened,
+    say: host.say,
+  });
   const stop = project.listen(refresh);
+
+  /** What is on screen while the project has no board: nothing, under the project's name. */
+  function noBoard(): Doc {
+    return { version: 1, id: projectId, meta: { title: '', project: project.title() }, nodes: [], edges: [] };
+  }
 
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
     const s = project.status();
     return {
-      collab: { ...s, ...project.steps(board), project: projectId, boards: project.boards(), takes: sharedTakes },
+      collab: { ...s, ...project.steps(board), project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: tabs.manage },
       saving: s.failure ? 'error' : s.pending ? 'saving' : 'saved',
       saveError: s.failure,
     };
@@ -55,16 +87,39 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
 
   /** The board as shown: as the project has it, with the edit under way here on top, and each legend as tall as its rows. */
   function view(): Doc {
-    return shareIds(fitLegends(withEdit(base!, draft)));
+    return shareIds(fitLegends(withEdit(base, draft)));
+  }
+
+  /** Put a board on screen as the project has it now, or the project with none (''). */
+  function put(next: string): void {
+    switching = true;
+    try {
+      // Called off, not written: kept on a board deleted meanwhile, it would come back with a restore.
+      if (board && !project.board(board)) draft = noEdit();
+      host.commitOperation();
+    } finally {
+      switching = false;
+    }
+    board = next;
+    base = (next && project.board(next)) || noBoard();
+    draft = noEdit();
+    host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
   }
 
   /**
    * Put the board on screen as the project has it now, with the edit under way here on top. What
-   * others took off the board leaves the selection.
+   * others took off the board leaves the selection; the board itself taken off, another is shown.
    */
   function refresh(): void {
+    if (switching || leaving) return;
+    const { link, refusal } = project.status();
+    if (link === 'refused') {
+      leaving = true;
+      return host.refused(refusal ?? 'no-access');
+    }
+    if (tabs.follow()) return;
     const s = host.get();
-    const fresh = project.board(board);
+    const fresh = board ? project.board(board) : noBoard();
     if (fresh && !sameBoard(fresh, base)) base = reuse(base, fresh);
     const shown = view();
     const doc = sameBoard(shown, s.doc) ? s.doc : shown;
@@ -88,8 +143,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
 
   return {
     edits: {
-      takes: sharedTakes,
+      takes,
       edit(next, record) {
+        if (!board) return host.refuse();
         const edit = editBetween(host.get().doc, next);
         if (!edit) return host.refuse();
         if (isNoEdit(edit)) return;
@@ -129,8 +185,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         if (!project.status().pending) host.say('共同編集先に保存済みです（変更は自動で保存されます）');
       },
       async leave() {
-        const { pending } = project.status();
-        return !pending || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
+        const { pending, link } = project.status();
+        // Turned away, the project stores nothing more: asking would offer no way to keep it.
+        return !pending || link === 'refused' || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
       },
       closing: () => project.status().pending > 0,
       // Nothing can go out as the page goes: `closing` has the browser ask about what is not stored yet.
@@ -138,27 +195,12 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       // What fails in this machine's store says nothing of what the server has stored.
       failed: () => {},
     },
-    boards: {
-      open(next) {
-        if (next === board) return true;
-        const doc = project.board(next);
-        if (!doc) return false;
-        host.commitOperation();
-        board = next;
-        base = doc;
-        host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
-        host.opened();
-        return true;
-      },
-      remove(id) {
-        if (!project.board(id)) return false;
-        host.refuse();
-        return true;
-      },
-      address: () => showSharedAddress(projectId),
-    },
+    boards: tabs.boards,
     local: null,
-    refusal: NOT_TAKEN,
+    get refusal() {
+      return board ? NOT_TAKEN : NO_BOARD;
+    },
+    start: tabs.start,
     close() {
       stop();
       project.close();

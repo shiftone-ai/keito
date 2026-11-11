@@ -91,4 +91,11 @@ export const KINDS: Record<BoardKind, KindSpec> = {
 
 export const KIND_ORDER: BoardKind[] = ['system', 'software', 'sequence', 'free'];
 
+const rank = (kind: Doc['kind']): number => KIND_ORDER.indexOf(kind ?? 'system');
+
+/** Boards of one project in the order of their tabs: by kind (system, software, sequence, free), then title. */
+export function tabOrder<T extends { kind?: Doc['kind']; title: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) => rank(a.kind) - rank(b.kind) || a.title.localeCompare(b.title, 'ja', { numeric: true }));
+}
+
 export const kindOf = (doc: Pick<Doc, 'kind'>): KindSpec => KINDS[doc.kind ?? 'system'] ?? KINDS.system;

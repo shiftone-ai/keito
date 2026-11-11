@@ -1,28 +1,23 @@
-import { KINDS, KIND_ORDER } from '../model/kinds';
+import { KINDS, tabOrder } from '../model/kinds';
 import { useStore } from '../model/store';
 import type { Doc } from '../model/types';
 import type { BoardInfo } from '../platform/storage';
 import { openBoards } from './Boards';
-
-const rank = (kind: Doc['kind']): number => KIND_ORDER.indexOf(kind ?? 'system');
-
-/** Boards of one project in the order of their tabs: by kind (system, software, sequence, free), then title. */
-export function tabOrder<T extends { kind?: Doc['kind']; title: string }>(list: T[]): T[] {
-  return [...list].sort((a, b) => rank(a.kind) - rank(b.kind) || a.title.localeCompare(b.title, 'ja', { numeric: true }));
-}
 
 /** A board of the open board's project, as its tab shows it. */
 type Tab = Pick<BoardInfo, 'id' | 'title' | 'kind'>;
 
 /**
  * The open board's project as tabs (the open board as it is now, its title or kind just edited
- * included). A shared project's tabs are its own boards (`shared`, see CollabState): a board of this
- * machine is never one of them, whatever its project is named.
+ * included). A shared project's tabs are its own boards (`shared`, see CollabState), the one on
+ * screen among them (or none, the project having no board): a board of this machine is never one
+ * of them, whatever its project is named.
  */
 function projectTabs(doc: Doc, boards: BoardInfo[], shared?: readonly Tab[]): Tab[] {
+  if (shared) return tabOrder([...shared]);
   const project = doc.meta.project?.trim();
   const here: Tab = { id: doc.id, title: doc.meta.title, kind: doc.kind };
-  const fellows = shared ?? (project ? boards.filter((b) => (b.project ?? '').trim() === project) : []);
+  const fellows = project ? boards.filter((b) => (b.project ?? '').trim() === project) : [];
   return tabOrder([here, ...fellows.filter((b) => b.id !== doc.id)]);
 }
 
