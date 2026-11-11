@@ -3,10 +3,9 @@ import * as Y from 'yjs';
 import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
-import { type SharedBoardInfo, addBoard, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
-import type { NodeEdit } from './edits';
-import { SCHEMA, boardDoc, projectTitle, renameProject } from './model';
-import { writeEdit } from './nodes';
+import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
+import type { BoardEdit } from './edits';
+import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
 import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
 
 /** Where a shared project is, and the credential that lets this client in. */
@@ -159,19 +158,20 @@ export function joinProject(join: SharedJoin) {
     notify();
   });
 
-  /** A board's nodes, with their history begun before the first edit here so that the edit is in it. */
-  function tracked(board: string): { nodes: Y.Map<unknown>; history: Y.UndoManager } | null {
+  /** What a board holds, with its history begun before the first edit here so that the edit is in it. */
+  function tracked(board: string): (BoardParts & { history: Y.UndoManager }) | null {
     const nodes = boardNodes(ydoc, board);
-    if (!nodes) return null;
+    const lines = boardLines(ydoc, board);
+    if (!nodes || !lines) return null;
     let history = histories.get(board);
-    // Not kept for nodes made anew (the board taken off and put back): it would take back edits of nodes no longer there.
-    if (!history || history.scope[0] !== nodes) {
+    // Not kept for nodes or lines made anew (the board taken off and put back): it would take back edits of ones no longer there.
+    if (!history || history.scope[0] !== nodes || history.scope[1] !== lines) {
       history?.destroy();
       // Not grouped by how soon edits follow each other: each is a step of its own unless it joins the last (see edit).
-      history = new Y.UndoManager(nodes, { trackedOrigins: new Set([drawing]), captureTimeout: Infinity });
+      history = new Y.UndoManager([nodes, lines], { trackedOrigins: new Set([drawing]), captureTimeout: Infinity });
       histories.set(board, history);
     }
-    return { nodes, history };
+    return { nodes, lines, history };
   }
 
   return {
@@ -193,11 +193,11 @@ export function joinProject(join: SharedJoin) {
       return () => void listeners.delete(hear);
     },
     /** Make an edit of a board: one commit confirmed once stored, and a step to undo of its own or, `joins`, part of this client's last. */
-    edit(board: string, edit: NodeEdit, joins = false): void {
+    edit(board: string, edit: BoardEdit, joins = false): void {
       const at = editing() ? tracked(board) : null;
       if (!at) return;
       if (!joins) at.history.stopCapturing();
-      ydoc.transact(() => writeEdit(at.nodes, edit), drawing);
+      ydoc.transact(() => writeEdit(at, edit), drawing);
     },
     /**
      * Take back this client's last edit of a board still to be seen there: what others did since,

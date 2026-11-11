@@ -6,9 +6,10 @@ import type { Target } from '../model/target';
 import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
 import type { SharedProject } from './client';
-import { type NodeEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
+import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
 import { showSharedAddress } from './join';
 import { NOT_TAKEN, sharedTakes } from './scope';
+import { validDrawing } from './valid';
 
 /** What the target of a shared board needs of the edit session it is the target of. */
 export interface Host {
@@ -41,7 +42,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   /** The board as the project has it, as last read: what the draft is shown on top of. */
   let base: Doc | null = null;
   /** The edit of the operation under way: shown here, written to the project when it ends. */
-  let draft: NodeEdit = noEdit();
+  let draft: BoardEdit = noEdit();
   const stop = project.listen(refresh);
 
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
@@ -53,9 +54,12 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     };
   }
 
-  /** The board as shown: as the project has it, with the edit under way here on top, and each legend as tall as its rows. */
+  /**
+   * The board as shown: as the project has it, with the edit under way here on top (without the lines
+   * whose ends others took off meanwhile), and each legend as tall as its rows.
+   */
   function view(): Doc {
-    return shareIds(fitLegends(withEdit(base!, draft)));
+    return shareIds(fitLegends(validDrawing(withEdit(base!, draft))));
   }
 
   /**
@@ -167,15 +171,18 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
 }
 
 /**
- * `next`, with the nodes that did not change kept as the objects `prev` has: read anew from the
- * project, every node is a new object, and the canvas redraws what it is handed anew.
+ * `next`, with the nodes and lines that did not change kept as the objects `prev` has: read anew from
+ * the project, every one is a new object, and the canvas redraws what it is handed anew.
  */
 function reuse(prev: Doc | null, next: Doc): Doc {
   if (!prev) return next;
-  const was = new Map(prev.nodes.map((n) => [n.id, n]));
-  const nodes = next.nodes.map((n) => {
-    const old = was.get(n.id);
-    return old && JSON.stringify(old) === JSON.stringify(n) ? old : n;
+  return { ...next, nodes: kept(prev.nodes, next.nodes), edges: kept(prev.edges, next.edges) };
+}
+
+function kept<T extends { id: string }>(prev: readonly T[], next: T[]): T[] {
+  const was = new Map(prev.map((x) => [x.id, x]));
+  return next.map((x) => {
+    const old = was.get(x.id);
+    return old && JSON.stringify(old) === JSON.stringify(x) ? old : x;
   });
-  return { ...next, nodes };
 }

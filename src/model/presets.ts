@@ -1,4 +1,4 @@
-import { freshId } from './ids';
+import { freshId, portIds } from './ids';
 import { currentSignal, signalOf } from './signals';
 import type { ColorKey, DeviceNode, Doc, Edge, EdgeEnd, Node, Port, ShapeKind } from './types';
 
@@ -335,7 +335,7 @@ export function claimPort(doc: Doc, nodeId: string, signal: string, side: Port['
   const found = n.ports.find((p) => p.signal === signal && p.side === side && !used.has(p.id));
   if (found) return { end: { node: nodeId, port: found.id }, doc };
   const count = n.ports.filter((p) => p.signal === signal && p.side === side).length;
-  const port: Port = { id: freshId(new Set(n.ports.map((p) => p.id)), 'p'), name: `${portBase(signal)} ${count + 1}`, side, signal };
+  const port: Port = { id: freshId(portIds(doc, n), 'p'), name: `${portBase(signal)} ${count + 1}`, side, signal };
   return {
     end: { node: nodeId, port: port.id },
     doc: { ...doc, nodes: doc.nodes.map((x) => (x.id === nodeId ? { ...n, ports: [...n.ports, port] } : x)) },

@@ -6,7 +6,7 @@ import { cableIds, idShown, labelStacked, lengthShown, protocolShown } from '../
 import { kindOf } from '../../model/kinds';
 import { signalOf } from '../../model/signals';
 import { linkClick } from '../../platform/io';
-import { useStore } from '../../model/store';
+import { useStore, useTakes } from '../../model/store';
 import { type Arrow, type Edge } from '../../model/types';
 import { useBurst } from '../burst';
 import { Field, Section, Head, SignalSelect, SignalHowTo, NewSignal, LabelSizeField } from './fields';
@@ -33,6 +33,7 @@ export function EdgePanel({ e }: { e: Edge }) {
   const cable = signalOf(e.signal).cable;
   const protocol = !!signalOf(e.signal).protocol;
   const kind = useStore((s) => kindOf(s.doc));
+  const takes = useTakes();
   return (
     <>
       <Head title={cable ? 'ケーブル' : protocol ? '通信' : 'コネクタ'} />
@@ -42,7 +43,7 @@ export function EdgePanel({ e }: { e: Edge }) {
           <SignalSelect flow value={e.signal} onChange={(signal) => patch({ signal, arrow: signal === 'flow' || signalOf(signal).protocol ? 'end' : signalOf(signal).cable ? 'none' : e.arrow }, true)} />
         </label>
         {/* Types of one's own are cables; a software board's protocols are the set offered. */}
-        {kind.cableOptions && <NewSignal onAdd={(signal) => patch({ signal, arrow: 'none' })} />}
+        {kind.cableOptions && takes('settings') && <NewSignal onAdd={(signal) => patch({ signal, arrow: 'none' })} />}
         {cable && <SignalHowTo />}
         {protocol && <Field label="ポート" placeholder="例: 443/tcp、7000/udp" value={e.spec ?? ''} onChange={(v) => patch({ spec: v || undefined })} />}
         {cable && (
@@ -67,10 +68,10 @@ export function EdgePanel({ e }: { e: Edge }) {
               ))}
           </>
         )}
-        <Field wrap label="備考" value={e.note} onChange={(v) => patch({ note: v })} />
+        <Field freeText wrap label="備考" value={e.note} onChange={(v) => patch({ note: v })} />
       </Section>
       <Section title="ラベル">
-        <Field wrap label="文（改行できます）" value={e.label} onChange={(v) => patch({ label: v })} />
+        <Field freeText wrap label="文（改行できます）" value={e.label} onChange={(v) => patch({ label: v })} />
         {cable && (
           <>
             <span className="group-label">ラベルに出すもの（品名・規格は書いてあれば出ます）</span>

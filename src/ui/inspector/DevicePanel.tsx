@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { safeUrl } from '../../model/url';
 import { colourKey, ipIssues, quantityOf, unitsOf } from '../../model/lists';
-import { freshId } from '../../model/ids';
+import { freshId, portIds } from '../../model/ids';
 import { kindOf } from '../../model/kinds';
 import { linkClick } from '../../platform/io';
 import { say, useStore, useTakes } from '../../model/store';
@@ -16,21 +16,25 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
   const patch = (p: Partial<DeviceNode>, record = false) => st().updateNode(n.id, p, record);
   const link = safeUrl(n.url);
   const saved = useStore((s) => s.presets.some((p) => p.name === n.text && p.maker === n.maker && p.model === n.model && !!p.software === (kindOf(s.doc).id === 'software')));
-  const setPort = (id: string, p: Partial<Port>, record: boolean) => patch({ ports: n.ports.map((x) => (x.id === id ? { ...x, ...p } : x)) }, record);
+  // The ports as the board has them now, not as last drawn: on a shared board, a port someone else
+  // took off since would otherwise be put back.
+  const portsNow = (): Port[] => (st().doc.nodes.find((x) => x.id === n.id) as DeviceNode | undefined)?.ports ?? [];
+  const setPort = (id: string, p: Partial<Port>, record: boolean) => patch({ ports: portsNow().map((x) => (x.id === id ? { ...x, ...p } : x)) }, record);
   const addPort = (side: Port['side']) => {
+    const ports = portsNow();
     // A name of its own (IN, IN 2, IN 3 …), so a cable can always tell its port from the others.
     const base = side === 'left' ? 'IN' : 'OUT';
-    const names = new Set(n.ports.map((p) => p.name));
+    const names = new Set(ports.map((p) => p.name));
     let name = base;
     for (let i = 2; names.has(name); i++) name = `${base} ${i}`;
-    patch({ ports: [...n.ports, { id: freshId(new Set(n.ports.map((p) => p.id)), 'p'), name, side, signal: soft ? 'data' : 'video' }] }, true);
+    patch({ ports: [...ports, { id: freshId(portIds(st().doc, { ...n, ports }), 'p'), name, side, signal: soft ? 'data' : 'video' }] }, true);
   };
   const removePort = (id: string) => {
     const on = (e: Edge) => (e.from.node === n.id && e.from.port === id) || (e.to.node === n.id && e.to.port === id);
     const along = st().doc.edges.filter(on).length;
     st().mutate((d) => ({
       ...d,
-      nodes: d.nodes.map((x) => (x.id === n.id ? { ...n, ports: n.ports.filter((p) => p.id !== id) } : x)),
+      nodes: d.nodes.map((x) => (x.id === n.id && x.type === 'device' ? { ...x, ports: x.ports.filter((p) => p.id !== id) } : x)),
       edges: d.edges.filter((e) => !on(e)),
     }));
     if (along) say(`ポートにつながっていた線 ${along} 本も一緒に消しました（⌘Z で戻せます）`);
@@ -54,11 +58,13 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
     return other ? other.text.split('\n')[0] : '';
   });
   const move = (id: string, dir: -1 | 1) => {
-    const port = n.ports.find((p) => p.id === id)!;
-    const same = n.ports.filter((p) => p.side === port.side);
+    const ports = portsNow();
+    const port = ports.find((p) => p.id === id);
+    if (!port) return;
+    const same = ports.filter((p) => p.side === port.side);
     const other = same[same.indexOf(port) + dir];
     if (!other) return;
-    patch({ ports: n.ports.map((p) => (p === port ? other : p === other ? port : p)) }, true);
+    patch({ ports: ports.map((p) => (p === port ? other : p === other ? port : p)) }, true);
   };
   const ports = (side: Port['side']) => n.ports.filter((p) => p.side === side);
   const takes = useTakes();
@@ -203,8 +209,8 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
               <div className="port-row" key={p.id}>
                 <PortName value={p.name} onChange={(v) => setPort(p.id, { name: v }, false)} />
                 <SignalSelect value={p.signal} onChange={(v) => setPort(p.id, { signal: v }, true)} />
-                <button className="mini" onClick={() => move(p.id, -1)} title="上へ">↑</button>
-                <button className="mini" onClick={() => move(p.id, 1)} title="下へ">↓</button>
+                <button className="mini" disabled={!takes('restack')} onClick={() => move(p.id, -1)} title="上へ">↑</button>
+                <button className="mini" disabled={!takes('restack')} onClick={() => move(p.id, 1)} title="下へ">↓</button>
                 <button className="mini" onClick={() => setPort(p.id, { side: side === 'left' ? 'right' : 'left' }, true)} title="反対側へ">⇄</button>
                 <button className="mini danger" onClick={() => removePort(p.id)} title="削除">×</button>
               </div>

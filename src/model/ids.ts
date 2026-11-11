@@ -1,22 +1,26 @@
-import type { Doc } from './types';
+import type { DeviceNode, Doc } from './types';
 
 /**
- * Boards edited on several machines at once (a shared project's, as shown): an id made for one of
+ * The boards edited on several machines at once (a shared project's), by id: an id made for one of
  * them must not depend on what this machine sees, or two people adding at once would make the same.
+ * Held by the board's id, not by a state of it, so that a state made from one shown (a line being
+ * planned on it) makes ids the same way.
  */
-const sharedBoards = new WeakSet<Doc>();
+const sharedBoards = new Set<string>();
 
-/** Have ids made for this state of a board (see allIds) unique wherever they are made. */
+/** Have ids made for this board (see allIds and portIds) unique wherever they are made. */
 export function shareIds(doc: Doc): Doc {
-  sharedBoards.add(doc);
+  sharedBoards.add(doc.id);
   return doc;
 }
 
 /** The ids taken on a shared board: an id made from them is unique by chance, not by what is here. */
 class SharedIds extends Set<string> {}
 
+const idsFor = (doc: Doc): Set<string> => (sharedBoards.has(doc.id) ? new SharedIds() : new Set<string>());
+
 export const allIds = (doc: Doc): Set<string> => {
-  const ids = sharedBoards.has(doc) ? new SharedIds() : new Set<string>();
+  const ids = idsFor(doc);
   for (const n of doc.nodes) {
     ids.add(n.id);
     if (n.type === 'device') for (const p of n.ports) ids.add(`${n.id}/${p.id}`);
@@ -24,6 +28,13 @@ export const allIds = (doc: Doc): Set<string> => {
   for (const e of doc.edges) ids.add(e.id);
   return ids;
 };
+
+/** The ids of a device's ports on a board, to make the id of a new port from (see freshId). */
+export function portIds(doc: Doc, device: DeviceNode): Set<string> {
+  const ids = idsFor(doc);
+  for (const p of device.ports) ids.add(p.id);
+  return ids;
+}
 
 /** 128 random bits as a UUID (v4); crypto.randomUUID needs a secure context, which a LAN address is not. */
 export function uuid(): string {

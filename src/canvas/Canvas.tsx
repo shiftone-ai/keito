@@ -810,6 +810,8 @@ export function Canvas() {
     }
     setGuides({});
     setBusy(false);
+    // Taken off by someone else since the pointer last moved: the drag ends making nothing, as when it moves.
+    if (d && lostTarget(st().doc, d)) return endDrag(d);
     if (d?.kind !== 'segment') endDrag(d);
     if (d?.kind === 'place') {
       // Worked out from the pointer itself: a quick drag may end before its outline was ever drawn.

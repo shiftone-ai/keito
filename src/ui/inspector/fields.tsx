@@ -254,11 +254,14 @@ export function SignalHowTo({ port }: { port?: boolean }) {
   );
 }
 
+/** A port's name: typed by hand, as a free-text Field. */
 export function PortName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const burst = useFieldBurst();
+  const takes = useTakes();
   return (
     <input
       value={value}
+      disabled={!takes('typing')}
       onFocus={burst.begin}
       onBlur={burst.end}
       onKeyDown={(e) => {

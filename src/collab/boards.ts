@@ -68,13 +68,19 @@ export function liveBoard(ydoc: Y.Doc, id: string): SharedBoardInfo | null {
   return board && !isDeleted(ydoc, id) ? infoOf(id, board) : null;
 }
 
-/** The nodes a board holds, deleted or not: what is kept for a restore. Null for an id the project never had. */
-export function boardNodes(ydoc: Y.Doc, id: string): Y.Map<unknown> | null {
-  const nodes = yBoard(ydoc, id)?.get('nodes');
-  return nodes instanceof Y.Map ? nodes : null;
+/** What a board holds under `key` (its nodes, its lines), deleted or not: what is kept for a restore. Null for an id the project never had. */
+function held(ydoc: Y.Doc, id: string, key: 'nodes' | 'lines'): Y.Map<unknown> | null {
+  const part = yBoard(ydoc, id)?.get(key);
+  return part instanceof Y.Map ? part : null;
 }
 
-/** Put a new board, holding no nodes yet, in the project, within the caller's transaction. Returns its nodes. */
+/** The nodes a board holds, deleted or not: what is kept for a restore. Null for an id the project never had. */
+export const boardNodes = (ydoc: Y.Doc, id: string): Y.Map<unknown> | null => held(ydoc, id, 'nodes');
+
+/** The lines a board holds, deleted or not, as boardNodes. */
+export const boardLines = (ydoc: Y.Doc, id: string): Y.Map<unknown> | null => held(ydoc, id, 'lines');
+
+/** Put a new board, holding nothing yet, in the project, within the caller's transaction. Returns its nodes. */
 export function putBoard(ydoc: Y.Doc, board: { id: string; title: string; kind: BoardKind }): Y.Map<unknown> {
   const y = new Y.Map<unknown>();
   const nodes = new Y.Map<unknown>();
@@ -82,6 +88,8 @@ export function putBoard(ydoc: Y.Doc, board: { id: string; title: string; kind: 
   y.set('title', board.title);
   y.set('kind', board.kind);
   y.set('nodes', nodes);
+  // Made with the board, never when the first line is put there: two people making it at once would each make one, and one would be lost.
+  y.set('lines', new Y.Map<unknown>());
   ydoc.getMap<YBoard>(BOARDS).set(board.id, y);
   return nodes;
 }

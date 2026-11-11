@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { wholeDevice } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
 import { FILL_STYLES, type Node, type Port, SHAPE_KINDS } from '../model/types';
-import type { NodeChange, NodeEdit } from './edits';
+import type { BoardEdit, Change, Items } from './edits';
 import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
 
 /**
@@ -13,16 +13,17 @@ import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
  * legend: … names: Y.Map<row, Y.Text>, hidden: Y.Map<row, true>
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
- * attributes of one node keep all their changes. What is typed by hand is a Y.Text.
+ * attributes of one node keep all their changes; so is a port's, and each port is an entry of its
+ * own, so ports two people add to one device at once are both kept. What is typed by hand is a Y.Text.
  */
 
-type YMap = Y.Map<unknown>;
-type Check = (v: unknown) => boolean;
+export type YMap = Y.Map<unknown>;
+export type Check = (v: unknown) => boolean;
 
-const oneOf = (values: readonly unknown[]): Check => (v) => values.includes(v);
-const isNumber: Check = (v) => typeof v === 'number' && Number.isFinite(v);
-const isString: Check = (v) => typeof v === 'string';
-const isBoolean: Check = (v) => typeof v === 'boolean';
+export const oneOf = (values: readonly unknown[]): Check => (v) => values.includes(v);
+export const isNumber: Check = (v) => typeof v === 'number' && Number.isFinite(v);
+export const isString: Check = (v) => typeof v === 'string';
+export const isBoolean: Check = (v) => typeof v === 'boolean';
 
 /** What a value written under each attribute must be to be read back: anything else is left unread. */
 const CHECKS = {
@@ -60,6 +61,31 @@ export const textOf = (v: unknown, fallback = ''): string => (v instanceof Y.Tex
 export const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const num = (v: unknown): number => (isNumber(v) ? (v as number) : 0);
 
+/** The place in the order of the entries of a map (the nodes of a board, its lines, a device's ports): lower comes first. */
+export const orderOf = (entry: unknown): number => (entry instanceof Y.Map ? num(entry.get('order')) : 0);
+
+/** The entries of a map read (those not read left out), in their order, then by id, so that every client lists them alike. */
+export function inOrder<T extends { id: string }>(map: YMap, read: (id: string, entry: YMap) => T | null): T[] {
+  const listed: { order: number; item: T }[] = [];
+  map.forEach((entry, id) => {
+    const item = entry instanceof Y.Map ? read(id, entry as YMap) : null;
+    if (item) listed.push({ order: orderOf(entry), item });
+  });
+  return listed.sort((a, b) => a.order - b.order || byId(a.item.id, b.item.id)).map((x) => x.item);
+}
+
+/** The first and the last place in the order of a map's entries (both 0 for none). */
+export function orderRange(map: YMap): { back: number; front: number } {
+  if (!map.size) return { back: 0, front: 0 };
+  let back = Infinity;
+  let front = -Infinity;
+  map.forEach((entry) => {
+    back = Math.min(back, orderOf(entry));
+    front = Math.max(front, orderOf(entry));
+  });
+  return { back, front };
+}
+
 function pair(v: unknown, a: 'x' | 'w', b: 'y' | 'h'): [number, number] | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
@@ -92,29 +118,16 @@ function writeAttribute(node: YMap, key: Attribute, v: unknown): void {
 const PARTS: Partial<Record<SharedType, { read(node: YMap): Record<string, unknown>; write(node: YMap, n: Node): void }>> = {
   device: {
     read(node) {
-      const ports: { order: number; port: Port }[] = [];
       const held = node.get('ports');
-      if (held instanceof Y.Map)
-        (held as YMap).forEach((p, id) => {
-          if (p instanceof Y.Map) ports.push({ order: num(p.get('order')), port: { id, name: textOf(p.get('name')), side: p.get('side'), signal: p.get('signal') } as Port });
-        });
-      ports.sort((a, b) => a.order - b.order || byId(a.port.id, b.port.id));
-      return { note: textOf(node.get('note')), ports: ports.map((x) => x.port) };
+      const ports = held instanceof Y.Map ? inOrder(held as YMap, (id, p) => ({ id, name: textOf(p.get('name')), side: p.get('side'), signal: p.get('signal') }) as Port) : [];
+      return { note: textOf(node.get('note')), ports };
     },
     write(node, n) {
       if (n.type !== 'device') return;
       node.set('note', new Y.Text(n.note));
       const ports = new Y.Map<unknown>();
       node.set('ports', ports);
-      n.ports.forEach((p, i) => {
-        const port = new Y.Map<unknown>();
-        ports.set(p.id, port);
-        port.set('id', p.id);
-        port.set('name', new Y.Text(p.name));
-        port.set('side', p.side);
-        port.set('signal', p.signal);
-        port.set('order', i);
-      });
+      n.ports.forEach((p, i) => putPort(ports, p, i));
     },
   },
   legend: {
@@ -151,9 +164,6 @@ export function nodeOf(id: string, node: YMap): Node | null {
   return read.type === 'device' ? wholeDevice(read) : read;
 }
 
-/** The place in the drawing order of the nodes of a board: lower is further back. */
-export const orderOf = (node: unknown): number => (node instanceof Y.Map ? num(node.get('order')) : 0);
-
 /** Write a new node into a board's nodes. */
 function putNode(nodes: YMap, n: Node, order: number): void {
   const type = n.type as SharedType;
@@ -172,31 +182,55 @@ function putNode(nodes: YMap, n: Node, order: number): void {
 }
 
 /** Change attributes of a node in place, each on its own: what others changed beside them stays. */
-function changeNode(node: YMap, change: NodeChange): void {
+function changeNode(node: YMap, change: Change): void {
   if ('x' in change) node.set('pos', { x: change.x, y: change.y });
   if ('w' in change) node.set('size', { w: change.w, h: change.h });
   for (const [key, v] of Object.entries(change)) if (key !== 'x' && key !== 'y' && key !== 'w' && key !== 'h') writeAttribute(node, key as Attribute, v);
 }
 
+/** Write a new port into a device's ports. */
+function putPort(ports: YMap, p: Port, order: number): void {
+  const port = new Y.Map<unknown>();
+  ports.set(p.id, port);
+  port.set('id', p.id);
+  port.set('name', new Y.Text(p.name));
+  port.set('side', p.side);
+  port.set('signal', p.signal);
+  port.set('order', order);
+}
+
+/** Put ports on a device, change and take off ports of it: as writeNodes does nodes. New ports go after the rest. */
+function writePorts(node: YMap, edit: Items<Port>): void {
+  const ports = node.get('ports');
+  if (!(ports instanceof Y.Map)) return;
+  const held = ports as YMap;
+  for (const id of edit.remove) held.delete(id);
+  for (const [id, change] of edit.set) {
+    const port = held.get(id);
+    if (port instanceof Y.Map) for (const [key, v] of Object.entries(change)) port.set(key, v);
+  }
+  let { front } = orderRange(held);
+  for (const p of edit.add) if (!held.has(p.id)) putPort(held, p, ++front);
+}
+
 /**
- * Write an edit into a board's nodes (within the caller's transaction). A change to a node no longer
- * there is dropped, never bringing the node back; a node put there under an id already taken is
- * not written over what holds it. Nodes put beneath the rest keep their order, the first furthest
- * back (as withEdit shows them).
+ * Write the nodes and ports of an edit into a board's nodes (within the caller's transaction). A
+ * change to a node or a port no longer there is dropped, never bringing it back; one put there under
+ * an id already taken is not written over what holds it. Nodes put beneath the rest keep their
+ * order, the first furthest back (as withEdit shows them).
  */
-export function writeEdit(nodes: YMap, edit: NodeEdit): void {
-  let back = Infinity;
-  let front = -Infinity;
-  nodes.forEach((n) => {
-    back = Math.min(back, orderOf(n));
-    front = Math.max(front, orderOf(n));
-  });
-  if (!nodes.size) back = front = 0;
-  let below = back - edit.add.filter((x) => x.back).length;
+export function writeNodes(nodes: YMap, edit: BoardEdit): void {
+  const range = orderRange(nodes);
+  let front = range.front;
+  let below = range.back - edit.add.filter((x) => x.back).length;
   for (const id of edit.remove) nodes.delete(id);
   for (const [id, change] of edit.set) {
     const node = nodes.get(id);
     if (node instanceof Y.Map) changeNode(node, change);
+  }
+  for (const [id, ports] of edit.ports) {
+    const node = nodes.get(id);
+    if (node instanceof Y.Map) writePorts(node, ports);
   }
   for (const { node, back: under } of edit.add) {
     if (nodes.has(node.id)) continue;
