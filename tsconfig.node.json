@@ -4,5 +4,5 @@
     "types": ["node"],
     "resolveJsonModule": true
   },
-  "include": ["server", "cli", "src/model", "src/export/xlsx.ts", "vite.config.ts", "test", "vitest.config.ts"]
+  "include": ["server", "cli", "src/model", "src/export/xlsx.ts", "vite.config.ts", "test", "vitest.config.ts", "e2e", "playwright.config.ts"]
 }
