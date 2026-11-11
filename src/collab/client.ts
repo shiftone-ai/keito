@@ -2,7 +2,9 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import type { BoardKind } from '../model/kinds';
 import type { Doc, Pt } from '../model/types';
-import { SCHEMA, type SharedBoardInfo, addBoard, boardDoc, boardList, deleteBoard, deletedBoardList, placeNodes, projectTitle, renameBoard, renameProject, restoreBoard, uniqueId } from './model';
+import { type SharedBoardInfo, addBoard, boardList, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
+import { uniqueId } from './id';
+import { SCHEMA, boardDoc, placeNodes, projectTitle, renameProject } from './model';
 import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
 
 /** Where a shared project is, and the credential that lets this client in. */
@@ -170,10 +172,7 @@ export function joinProject(join: SharedJoin) {
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {
-      if (!editing()) return null;
-      const id = uniqueId();
-      addBoard(ydoc, { id, title, kind }, manage);
-      return id;
+      return editing() ? addBoard(ydoc, { title, kind }, manage) : null;
     },
     renameBoard(id: string, title: string): void {
       if (editing()) renameBoard(ydoc, id, title, manage);

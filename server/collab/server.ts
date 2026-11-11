@@ -1,4 +1,4 @@
-import { type Document, Server } from '@hocuspocus/server';
+import { type Document, type Hocuspocus, Server } from '@hocuspocus/server';
 import * as Y from 'yjs';
 import { type Answer, type Refusal, readCommit, readCredential, writeAnswer, writeDeleted } from '../../src/collab/protocol';
 import type { CollabStore } from './store';
@@ -23,14 +23,26 @@ function closeDeleted(document: Document): void {
 }
 
 /**
+ * Let go of the clients of every open project deleted by another process (`delete` of cli.ts),
+ * looked up every WATCH_MS. Returns what stops the watch.
+ */
+function watchDeleted(hocuspocus: Hocuspocus, store: CollabStore): () => void {
+  const timer = setInterval(() => {
+    // A project left open with no clients, until Hocuspocus unloads it, has nobody to tell.
+    for (const document of hocuspocus.documents.values()) if (document.getConnectionsCount() && store.isDeleted(document.name)) closeDeleted(document);
+  }, WATCH_MS);
+  return () => clearInterval(timer);
+}
+
+/**
  * The collaboration server: Hocuspocus over the store. A connection is let in to one project by a
  * grant for that project (the project id alone is not enough), only while the project is not
  * deleted, and only a client of the project's schema. Edits reach the project only as commits (see
- * src/collab/protocol.ts), answered once stored. A project deleted while open (`delete` of cli.ts,
- * another process over the same file) has its clients let go within WATCH_MS.
+ * src/collab/protocol.ts), answered once stored. A project deleted while open has its clients let go
+ * (see watchDeleted).
  */
 export function collabServer(store: CollabStore, options: { port: number; address?: string }): Server {
-  let watch: ReturnType<typeof setInterval> | undefined;
+  let unwatch = (): void => {};
   const server: Server = new Server({
     port: options.port,
     address: options.address,
@@ -86,14 +98,11 @@ export function collabServer(store: CollabStore, options: { port: number; addres
     },
 
     async onListen() {
-      watch = setInterval(() => {
-        // A project left open with no clients, until Hocuspocus unloads it, has nobody to tell.
-        for (const document of server.hocuspocus.documents.values()) if (document.getConnectionsCount() && store.isDeleted(document.name)) closeDeleted(document);
-      }, WATCH_MS);
+      unwatch = watchDeleted(server.hocuspocus, store);
     },
 
     async onDestroy() {
-      clearInterval(watch);
+      unwatch();
     },
   });
   return server;

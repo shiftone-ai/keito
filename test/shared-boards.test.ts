@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { openStore } from '../server/collab/store';
 import { type SharedProject, joinProject } from '../src/collab/client';
-import { type ProjectSeed, SCHEMA, boardList, deleteBoard, restoreBoard, seedProject } from '../src/collab/model';
+import { boardList, deleteBoard, restoreBoard } from '../src/collab/boards';
+import { type ProjectSeed, SCHEMA, seedProject } from '../src/collab/model';
 import { readAnswer, writeCommit, writeCredential } from '../src/collab/protocol';
 import { type RunningServer, seedData, startServer, until } from './collab';
 
