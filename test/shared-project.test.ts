@@ -4,7 +4,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { openStore } from '../server/collab/store';
-import { type ProjectSeed, SCHEMA, placeNodes } from '../src/collab/model';
+import { boardNodes } from '../src/collab/boards';
+import { noEdit } from '../src/collab/edits';
+import { type ProjectSeed, SCHEMA } from '../src/collab/model';
+import { writeEdit } from '../src/collab/nodes';
 import { writeCredential } from '../src/collab/protocol';
 import type { Doc } from '../src/model/types';
 import { type RunningServer, seedData, startServer, until } from './collab';
@@ -103,7 +106,7 @@ describe('a shared project', () => {
     const provider = new HocuspocusProvider({ url: server.url, name: seed.id, document: ydoc, token: writeCredential({ token, schema: SCHEMA }) });
     try {
       await new Promise<void>((resolve) => provider.on('synced', () => resolve()));
-      placeNodes(ydoc, seed.board.id, new Map([[seed.shape.id, { x: 500, y: 500 }]]), 'not a commit');
+      ydoc.transact(() => writeEdit(boardNodes(ydoc, seed.board.id)!, { ...noEdit(), set: new Map([[seed.shape.id, { x: 500, y: 500 }]]) }), 'not a commit');
       // Nothing comes to wait for: what is checked is that the edit never arrives.
       await new Promise((r) => setTimeout(r, 500));
       const a = await editor();
@@ -198,14 +201,18 @@ describe('a shared project', () => {
     a.disk.backend.saveRevision = saveRevision;
     const before = a.s().doc;
 
+    // A text replaced whole, the board's settings, a picture, a line, copies.
     a.s().updateNode(seed.shape.id, { text: '書き換え' });
-    a.s().removeIds([seed.shape.id]);
     a.s().setDoc({ ...before, meta: { ...before.meta, title: '全文で上書き' } });
-    a.s().mutate((d) => ({ ...d, nodes: [...d.nodes, { ...d.nodes[0], id: 'added' }] }));
-    a.s().undo();
+    a.s().mutate((d) => ({ ...d, nodes: [...d.nodes, { id: 'img', type: 'image', x: 0, y: 0, w: 10, h: 10, text: '', src: 'data:,' }] }));
+    a.s().mutate((d) => ({ ...d, edges: [{ id: 'e', from: { node: seed.shape.id }, to: { node: seed.shape.id }, signal: 'flow', label: '', length: null, arrow: 'end', note: '' }] }));
+    a.s().select([seed.shape.id]);
+    a.session.duplicateSelection();
+    a.session.restack('front');
     a.s().deleteBoard(seed.board.id);
     a.s().nameState('提出版');
-    a.s().setTool('rect');
+    // A text box would be nothing there: no text is typed into it yet.
+    for (const tool of ['sequence', 'text'] as const) a.s().setTool(tool);
     expect(a.s().notice).toMatch(/共有中のボード/);
     expect(a.s().tool).toBe('select');
     a.disk.box.notify({ id: seed.board.id, serial: 99 });

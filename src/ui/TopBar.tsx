@@ -1,7 +1,8 @@
 import { ProjectMenu } from './ProjectMenu';
 import { fromYaml } from '../model/dsl';
-import { randomId } from '../model/presets';
-import { emptyDoc, saveNow, useStore } from '../model/store';
+import { SHARED_SO_FAR } from '../collab/scope';
+import { randomId } from '../model/ids';
+import { emptyDoc, saveNow, useStore, useTakes } from '../model/store';
 import { tidy } from '../model/tidy';
 import { kindOf } from '../model/kinds';
 import { openComments } from '../model/comments';
@@ -59,10 +60,12 @@ function UpdateButton() {
 export function TopBar() {
   const doc = useStore((s) => s.doc);
   const docks = useStore((s) => s.docks);
-  const canUndo = useStore((s) => s.past.length > 0);
-  const canRedo = useStore((s) => s.future.length > 0);
+  // A shared board takes back this page's own edits (see CollabState), not earlier states of the board.
+  const canUndo = useStore((s) => (s.collab ? s.collab.undo : s.past.length > 0));
+  const canRedo = useStore((s) => (s.collab ? s.collab.redo : s.future.length > 0));
   const saving = useStore((s) => s.saving);
   const collab = useStore((s) => s.collab);
+  const takes = useTakes();
   const saveError = useStore((s) => s.saveError);
   const mode = useStore((s) => s.mode);
   const viewing = useStore((s) => !!s.viewing);
@@ -92,7 +95,7 @@ export function TopBar() {
       </button>
       <button
         className="ghost danger-hover"
-        disabled={!!collab}
+        disabled={!takes('removing')}
         data-tip="このボードを削除（ボード一覧から戻せます。図形の削除は Delete）"
         onClick={() => {
           void ask(`「${doc.meta.title}」を削除しますか？\n（ボード一覧の「最近削除したボード」から戻せます）`).then((yes) => yes && st().deleteBoard(doc.id));
@@ -104,14 +107,14 @@ export function TopBar() {
       <span className="sep" />
       <button disabled={!canUndo} onClick={() => st().undo()} data-tip="元に戻す（⌘Z）" aria-label="元に戻す" className="ghost icon">{ICON.undo}</button>
       <button disabled={!canRedo} onClick={() => st().redo()} data-tip="やり直す（⇧⌘Z）" aria-label="やり直す" className="ghost icon">{ICON.redo}</button>
-      <button className="ghost" disabled={viewing || !!collab} onClick={() => st().setDoc(tidy(st().doc))} data-tip="整頓: 機材の高さをそろえて線をまっすぐにし、折れ位置を並べ直す（⌘Z で戻せます）">
+      <button className="ghost" disabled={viewing || !takes('tidy')} onClick={() => st().setDoc(tidy(st().doc))} data-tip="整頓: 機材の高さをそろえて線をまっすぐにし、折れ位置を並べ直す（⌘Z で戻せます）">
         {ICON.tidy}
         整頓
       </button>
       <span className="sep" />
       {collab ? (
         // A shared project's board: saved when the collaboration server has stored the edits, not when it has them.
-        <span className={`save-state ${saving}`} title={saving === 'error' ? `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。` : `共有中の案件「${doc.meta.project}」（試験中: 図形の移動だけを共有します）`}>
+        <span className={`save-state ${saving}`} title={saving === 'error' ? `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。` : `共有中の案件「${doc.meta.project}」（試験中: ${SHARED_SO_FAR}を共有します）`}>
           {saving === 'error' ? '共同編集先に保存できていません' : collab.pending && collab.link !== 'online' ? `オフライン・未送信 ${collab.pending} 件` : collab.pending ? '共同編集先に保存中…' : collab.link !== 'online' ? 'オフライン' : '共同編集先に保存済み'}
           {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
         </span>

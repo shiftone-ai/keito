@@ -1,32 +1,40 @@
 import { LABEL_SIZE, LABEL_SIZES } from '../../model/labels';
-import { type ReactNode, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react';
 import { LINE_COLORS } from '../../model/lineColor';
 import { PRESETS, SOFTWARE } from '../../model/presets';
 import { kindOf } from '../../model/kinds';
 import { COLOR_KEYS, PALETTE, STICKY, allSignals, groupSignals } from '../../model/signals';
-import { useStore } from '../../model/store';
+import { useStore, useTakes } from '../../model/store';
 import { type Edge, type Node } from '../../model/types';
 import { sizesFor } from '../icons';
 import { textHeightFor, textWeight } from '../../canvas/render';
 import { useShallow } from 'zustand/react/shallow';
+import { useFieldBurst } from '../burst';
 import { composing } from '../keys';
 
-/** Text input that records one undo step per editing burst instead of per keystroke. */
-export function Field({ label, value, onChange, multiline, wrap, type = 'text', placeholder, onPasteText, list }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; wrap?: boolean; type?: string; placeholder?: string; onPasteText?: (text: string) => boolean; list?: string }) {
-  const dirty = useRef(false);
+/**
+ * Text input that records one undo step per editing burst instead of per keystroke (see
+ * useFieldBurst). `freeText`: a name or a note, which a shared board does not take typing into yet
+ * (there it would be replaced whole, losing what someone else typed into it meanwhile).
+ */
+export function Field({ label, value, onChange, multiline, wrap, type = 'text', placeholder, onPasteText, list, freeText }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; wrap?: boolean; type?: string; placeholder?: string; onPasteText?: (text: string) => boolean; list?: string; freeText?: boolean }) {
+  const burst = useFieldBurst();
+  const takes = useTakes();
   const props = {
     value,
     placeholder,
+    disabled: !!freeText && !takes('typing'),
     // Lets a field hand pasted text to another one (a URL pasted into the model field, say).
     onPaste: (e: { clipboardData: DataTransfer; preventDefault: () => void }) => {
       if (onPasteText?.(e.clipboardData.getData('text/plain'))) e.preventDefault();
     },
-    onFocus: () => (dirty.current = false),
+    onFocus: burst.begin,
+    onBlur: burst.end,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !multiline && !wrap && !composing(e)) burst.end();
+    },
     onChange: (e: { target: { value: string } }) => {
-      if (!dirty.current) {
-        dirty.current = true;
-        useStore.getState().checkpoint();
-      }
+      burst.change();
       onChange(e.target.value);
     },
   };
@@ -80,7 +88,7 @@ export function CategoryField({ id, value, onChange, soft }: { id: string; value
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState(false);
   const [hi, setHi] = useState(-1);
-  const dirty = useRef(false);
+  const burst = useFieldBurst();
   const box = useRef<HTMLInputElement>(null);
   const used = useStore(
     useShallow((s) => {
@@ -117,18 +125,18 @@ export function CategoryField({ id, value, onChange, soft }: { id: string; value
           role="combobox"
           aria-expanded={open}
           onFocus={() => {
-            dirty.current = false;
+            burst.begin();
             setOpen(true);
             setTyped(false);
             setHi(-1);
           }}
           onClick={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
+          onBlur={() => {
+            setOpen(false);
+            burst.end();
+          }}
           onChange={(e) => {
-            if (!dirty.current) {
-              dirty.current = true;
-              useStore.getState().checkpoint();
-            }
+            burst.change();
             onChange(e.target.value);
             setTyped(true);
             setOpen(true);
@@ -145,6 +153,8 @@ export function CategoryField({ id, value, onChange, soft }: { id: string; value
             } else if (e.key === 'Enter' && open && hi >= 0 && flat[hi]) {
               e.preventDefault();
               pick(flat[hi]);
+            } else if (e.key === 'Enter') {
+              burst.end();
             } else if (e.key === 'Escape' && open) {
               e.stopPropagation();
               setOpen(false);
@@ -245,16 +255,17 @@ export function SignalHowTo({ port }: { port?: boolean }) {
 }
 
 export function PortName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const dirty = useRef(false);
+  const burst = useFieldBurst();
   return (
     <input
       value={value}
-      onFocus={() => (dirty.current = false)}
+      onFocus={burst.begin}
+      onBlur={burst.end}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !composing(e)) burst.end();
+      }}
       onChange={(e) => {
-        if (!dirty.current) {
-          dirty.current = true;
-          useStore.getState().checkpoint();
-        }
+        burst.change();
         onChange(e.target.value);
       }}
     />

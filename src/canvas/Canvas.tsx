@@ -3,11 +3,13 @@ import { flushSync } from 'react-dom';
 import type { CSSProperties, MouseEvent as RMouseEvent, ReactNode, PointerEvent as RPointerEvent } from 'react';
 import { labelFont } from '../model/labels';
 import { hopOrder, DEVICE_NAME, deviceHead, type Dir, center, contains, intersects, isUnderlay, isTagged, labelPoint, nearestT, nodeAt, nodeRect, pathD, portPos, routeEdges, sidePoint, simplify, snap } from '../model/geometry';
-import { type CreateKind, allIds, makeEdge, makeImage, makeNode } from '../model/presets';
+import { allIds } from '../model/ids';
+import { type CreateKind, makeEdge, makeImage, makeNode } from '../model/presets';
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
-import { type Placing, duplicateInPlace, storeImage, useStore } from '../model/store';
+import { NOT_TAKEN } from '../collab/scope';
+import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore, useTakes } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
 import { isImageFile, readImageFile } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
@@ -15,7 +17,7 @@ import { EdgeView, HopCaps, INK, LabelChip, NodeView, SCREEN, STICKY_HEAD, TEXT,
 import { QuickBar } from '../ui/QuickBar';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
-import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, st } from './drag';
+import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, lostTarget, st } from './drag';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
 
@@ -122,7 +124,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
   s.mutate((d) => ({ ...d, nodes: kind === 'frame' ? [n, ...d.nodes] : [...d.nodes, n] }));
   s.select([n.id]);
   s.setTool('select');
-  if (kind !== 'sequence') {
+  if (kind !== 'sequence' && takesIn(s)('typing')) {
     // Its first text goes into the same undo step as the box itself.
     fresh = n.id;
     s.setEditing(n.id);
@@ -137,6 +139,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
 export function insertText(text: string): void {
   const s = st();
   if (!kindOf(s.doc).tools.includes('text')) return;
+  if (!takesIn(s)('text')) return say(NOT_TAKEN);
   const p = viewCenter();
   const n = makeNode('text', snap(p.x), snap(p.y), allIds(s.doc), text);
   n.h = Math.max(n.h, textHeightFor(n, text));
@@ -235,7 +238,7 @@ function neededHeight(n: Node, text: string): number | null {
 
 export function Canvas() {
   const viewing = useStore((s) => !!s.viewing);
-  const collab = useStore((s) => !!s.collab);
+  const takes = useTakes();
   const svgRef = useRef<SVGSVGElement>(null);
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
@@ -619,6 +622,7 @@ export function Canvas() {
       s.setView({ ...s.view, x: d.vx + e.clientX - d.sx, y: d.vy + e.clientY - d.sy });
       return;
     }
+    if (lostTarget(s.doc, d)) return onCancel();
     const p = world(e);
     if (d.kind === 'marquee') {
       const rect = { x: Math.min(d.start.x, p.x), y: Math.min(d.start.y, p.y), w: Math.abs(p.x - d.start.x), h: Math.abs(p.y - d.start.y) };
@@ -702,6 +706,8 @@ export function Canvas() {
       if (d.kind === 'move' && d.dup) {
         // The copies take the originals' places in the drag (in the same undo step).
         const map = duplicateInPlace(s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id)));
+        // No copies made (a shared board takes none yet): moving the originals instead is not what was asked.
+        if (!map.size) return onCancel();
         d.orig = new Map([...d.orig].map(([id, q]) => [map.get(id) ?? id, q]));
         d.routes = new Map([...d.routes].map(([id, r]) => [map.get(id) ?? id, r]));
         d.lead = map.get(d.lead) ?? d.lead;
@@ -867,13 +873,13 @@ export function Canvas() {
   const selectedEdge = selection.length === 1 ? doc.edges.find((e) => e.id === selection[0]) : undefined;
   const handleNode = doc.nodes.find((n) => n.id === hover && n.id !== hush && hasHandles(n)) ?? (single && hasHandles(single) ? single : undefined);
   const hs = 8 / view.k;
-  // Hidden rather than refused when used: an old state from the history is only looked at, and a
-  // shared board takes only moves so far.
-  const idle = tool === 'select' && !editing && !busy && !viewing && !collab;
+  // Hidden rather than refused when used: an old state from the history is only looked at.
+  const idle = tool === 'select' && !editing && !busy && !viewing;
+  const wiring = idle && takes('lines');
   const cursor = space || tool === 'pan' ? 'grab' : tool === 'select' && !placing ? 'default' : 'crosshair';
   // What waits to be placed, outlined under the pointer: a library item, or the box an armed tool makes.
   const waiting = placing ? { label: placing.label, size: placing.size } : placesBox(tool) && boxSize(tool) && !busy ? { label: '', size: boxSize(tool)! } : null;
-  const preview = idle && handleNode && canConnect(handleNode) && hoverSide ? spawnRect(doc, handleNode, hoverSide) : null;
+  const preview = wiring && handleNode && canConnect(handleNode) && hoverSide ? spawnRect(doc, handleNode, hoverSide) : null;
 
   // While searching, what was not found fades (areas less, so the found keep their setting).
   const faded = (id: string, frame = false): number | undefined => (found && !found.has(id) ? (frame ? 0.5 : 0.22) : undefined);
@@ -992,7 +998,7 @@ export function Canvas() {
             })()}
 
           {handleNode &&
-            idle &&
+            wiring &&
             SIDES.map((side) => {
               const at = sidePoint(nodeRect(handleNode), side);
               // A junction dot is smaller than its handles: stand them off so they don't pile up on it.
@@ -1017,7 +1023,7 @@ export function Canvas() {
               );
             })}
 
-          {idle &&
+          {wiring &&
             devicePorts((key, p, end, side) => {
               // Never smaller on screen than a fingertip of a pointer, however far out the view is
               // zoomed; set a little outside the box, so its edge still takes the box itself; and
@@ -1026,7 +1032,7 @@ export function Canvas() {
               const r = Math.max(9, 7 / view.k);
               return <circle key={key} className="port-hit" cx={p.x + out * r * 0.35} cy={p.y} r={r} onPointerDown={(e) => takePort(e, end, p)} />;
             })}
-          {idle && selectedEdge && !isTagged(doc, selectedEdge) && (
+          {wiring && selectedEdge && !isTagged(doc, selectedEdge) && (
             <EdgeHandles pts={routes.get(selectedEdge.id) ?? []} k={view.k} manual={!!selectedEdge.route} onSegment={(ev, seg, h, route) => onSegmentDown(ev, selectedEdge.id, seg, h, route)} onEnd={(ev, end, other) => onEndDown(ev, selectedEdge.id, end, other)} />
           )}
           {/* While a cable is being dragged, the port under the cursor lights up as the drop target. */}

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { safeUrl } from '../../model/url';
 import { colourKey, ipIssues, quantityOf, unitsOf } from '../../model/lists';
-import { freshId } from '../../model/presets';
+import { freshId } from '../../model/ids';
 import { kindOf } from '../../model/kinds';
 import { linkClick } from '../../platform/io';
-import { say, useStore } from '../../model/store';
+import { say, useStore, useTakes } from '../../model/store';
 import { type DeviceNode, type Edge, type Port } from '../../model/types';
 import { RunsOn, SharedSection } from '../Shared';
 import { Field, Section, Head, SUPPLY_CATEGORY, CategoryField, Colors, SignalSelect, SignalHowTo, PortName, num } from './fields';
@@ -61,11 +61,12 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
     patch({ ports: n.ports.map((p) => (p === port ? other : p === other ? port : p)) }, true);
   };
   const ports = (side: Port['side']) => n.ports.filter((p) => p.side === side);
+  const takes = useTakes();
   return (
     <>
       <Head title={soft ? '部品' : '機材'} id={n.id} />
       <Section title="基本情報">
-        <Field wrap label="名称（改行できます）" value={n.text} onChange={(v) => patch({ text: v })} />
+        <Field freeText wrap label="名称（改行できます）" value={n.text} onChange={(v) => patch({ text: v })} />
         {/* A device's category has the row to itself; a piece of software's shares it with its version. */}
         {soft ? (
           <div className="grid2">
@@ -100,7 +101,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
           ) : (
             <p className="error">Web のアドレス（https://…）として読めません。</p>
           ))}
-        <Field wrap label="備考" value={n.note} onChange={(v) => patch({ note: v })} />
+        <Field freeText wrap label="備考" value={n.note} onChange={(v) => patch({ note: v })} />
       </Section>
       {/* A piece of software has no quantity, price, power or supplier: those belong to the gear it runs on. */}
       {!soft && (
@@ -155,7 +156,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
         </Section>
       )}
       <Section title={soft ? '動作環境' : 'ネットワーク'}>
-        {soft && <RunsOn n={n} />}
+        {soft && takes('links') && <RunsOn n={n} />}
         {soft && n.runsOn && (
           <p className="hint">
             ホスト名 {n.host || '—'}／IP {n.ip || '—'}（動作ホストの機材から）
@@ -182,37 +183,38 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
         </label>
       </Section>
       {(['left', 'right'] as const).map((side) => (
-        <Section
-          key={side}
-          title={side === 'left' ? '入力ポート（左）' : '出力ポート（右）'}
-          note={`${ports(side).length} 個`}
-          action={
-            <button className="mini" onClick={() => addPort(side)}>
-              ＋追加
-            </button>
-          }
-        >
-          {ports(side).length > 0 && (
-            <div className="port-head">
-              <span>名前</span>
-              <span>種別</span>
-            </div>
-          )}
-          {ports(side).map((p) => (
-            <div className="port-row" key={p.id}>
-              <PortName value={p.name} onChange={(v) => setPort(p.id, { name: v }, false)} />
-              <SignalSelect value={p.signal} onChange={(v) => setPort(p.id, { signal: v }, true)} />
-              <button className="mini" onClick={() => move(p.id, -1)} title="上へ">↑</button>
-              <button className="mini" onClick={() => move(p.id, 1)} title="下へ">↓</button>
-              <button className="mini" onClick={() => setPort(p.id, { side: side === 'left' ? 'right' : 'left' }, true)} title="反対側へ">⇄</button>
-              <button className="mini danger" onClick={() => removePort(p.id)} title="削除">×</button>
-            </div>
-          ))}
-          {!ports(side).length && <p className="hint">ポートはありません。</p>}
-        </Section>
+        <fieldset key={side} className="plain" disabled={!takes('ports')}>
+          <Section
+            title={side === 'left' ? '入力ポート（左）' : '出力ポート（右）'}
+            note={`${ports(side).length} 個`}
+            action={
+              <button className="mini" onClick={() => addPort(side)}>
+                ＋追加
+              </button>
+            }
+          >
+            {ports(side).length > 0 && (
+              <div className="port-head">
+                <span>名前</span>
+                <span>種別</span>
+              </div>
+            )}
+            {ports(side).map((p) => (
+              <div className="port-row" key={p.id}>
+                <PortName value={p.name} onChange={(v) => setPort(p.id, { name: v }, false)} />
+                <SignalSelect value={p.signal} onChange={(v) => setPort(p.id, { signal: v }, true)} />
+                <button className="mini" onClick={() => move(p.id, -1)} title="上へ">↑</button>
+                <button className="mini" onClick={() => move(p.id, 1)} title="下へ">↓</button>
+                <button className="mini" onClick={() => setPort(p.id, { side: side === 'left' ? 'right' : 'left' }, true)} title="反対側へ">⇄</button>
+                <button className="mini danger" onClick={() => removePort(p.id)} title="削除">×</button>
+              </div>
+            ))}
+            {!ports(side).length && <p className="hint">ポートはありません。</p>}
+          </Section>
+        </fieldset>
       ))}
       {!soft && <SignalHowTo port />}
-      <SharedSection n={n} />
+      {takes('links') && <SharedSection n={n} />}
       <button className="wide" title="名称・メーカー・型番・ポート構成などを、機材ライブラリの「マイプリセット」に保存します" onClick={() => st().savePreset(n.id)}>
         {saved ? 'マイプリセットを上書き保存' : 'マイプリセットに保存'}
       </button>

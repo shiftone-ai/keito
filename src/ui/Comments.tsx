@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { commentsOf, pinLabel } from '../model/comments';
 import { STICKY } from '../model/signals';
-import { centerOn, useStore } from '../model/store';
+import { centerOn, useStore, useTakes } from '../model/store';
 import type { StickyNode } from '../model/types';
 
 function when(t?: number): string {
@@ -19,7 +19,8 @@ function when(t?: number): string {
 export function CommentsPanel() {
   const st = useStore.getState;
   const doc = useStore((s) => s.doc);
-  const locked = useStore((s) => !!s.viewing || !!s.collab);
+  const takes = useTakes();
+  const locked = useStore((s) => !!s.viewing) || !takes('comments');
   const selection = useStore((s) => s.selection);
   const [showDone, setShowDone] = useState(false);
   const all = commentsOf(doc).sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.y - b.y || a.x - b.x);

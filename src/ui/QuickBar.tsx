@@ -5,7 +5,7 @@ import { docBounds, isTagged, labelPoint, routeEdges } from '../model/geometry';
 import { LABEL_SIZE, LABEL_SIZES } from '../model/labels';
 import { LINE_COLORS, lineColor, lineDashed, paintLine } from '../model/lineColor';
 import { COLOR_KEYS, PALETTE, STICKY, STRONG, signalOf } from '../model/signals';
-import { duplicateSelection, useStore } from '../model/store';
+import { duplicateSelection, useStore, useTakes } from '../model/store';
 import { type ColorKey, type Edge, type Node, hasText } from '../model/types';
 import { safeUrl } from '../model/url';
 import { COLOR_NAME, FILLS, FillPreview, ICON, SHAPES, shapeIcon, sizesFor } from './icons';
@@ -40,6 +40,7 @@ export function QuickBar() {
   const doc = useStore((s) => s.doc);
   const selection = useStore((s) => s.selection);
   const view = useStore((s) => s.view);
+  const takes = useTakes();
   const [menu, setMenu] = useState<'shape' | 'color' | 'size' | 'line' | null>(null);
   // Whether a colour picked for a line goes to its whole signal type; set once the selected line is known.
   const [wide, setWide] = useState<boolean | null>(null);
@@ -333,12 +334,12 @@ export function QuickBar() {
           <span>型番のページ</span>
         </Btn>
       )}
-      {editId && (
+      {editId && takes('typing') && (
         <Btn tip={edge ? 'ラベルを編集 (Enter)' : '文字を編集 (Enter)'} onClick={() => st().setEditing(editId)}>
           {ICON.text}
         </Btn>
       )}
-      {nodes.length > 0 && (
+      {nodes.length > 0 && takes('copying') && (
         <Btn tip="複製 (⌘D)" onClick={() => duplicateSelection()}>
           {ICON.duplicate}
         </Btn>

@@ -1,10 +1,12 @@
 export type SignalId = string;
 export type PortSide = 'left' | 'right';
-export type ShapeKind = 'rect' | 'round' | 'diamond' | 'ellipse' | 'cloud';
+export const SHAPE_KINDS = ['rect', 'round', 'diamond', 'ellipse', 'cloud'] as const;
+export type ShapeKind = (typeof SHAPE_KINDS)[number];
 export type ColorKey = 'white' | 'gray' | 'blue' | 'green' | 'yellow' | 'orange' | 'red' | 'purple';
 export type Arrow = 'none' | 'end' | 'both';
 /** tint: pale fill + coloured border (default) / solid: full-strength fill / outline: white fill / none: see-through. */
-export type FillStyle = 'tint' | 'solid' | 'outline' | 'none';
+export const FILL_STYLES = ['tint', 'solid', 'outline', 'none'] as const;
+export type FillStyle = (typeof FILL_STYLES)[number];
 
 export interface Pt {
   x: number;

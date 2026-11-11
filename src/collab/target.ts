@@ -1,13 +1,14 @@
 import { sameBoard, stillIn } from '../model/history';
+import { fitLegends } from '../model/legend';
+import { shareIds } from '../model/ids';
 import type { State } from '../model/store';
 import type { Target } from '../model/target';
-import type { Doc, Pt } from '../model/types';
+import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
 import type { SharedProject } from './client';
+import { type NodeEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
 import { showSharedAddress } from './join';
-
-/** Said when a shared board is asked for an edit it does not take yet. */
-const COLLAB_ONLY = '共有中のボードでは、まだ図形の移動しかできません';
+import { NOT_TAKEN, sharedTakes } from './scope';
 
 /** What the target of a shared board needs of the edit session it is the target of. */
 export interface Host {
@@ -27,75 +28,93 @@ export interface Host {
 }
 
 /**
- * The target of a shared project's board (see openCollab). Its edits are moves of nodes, shown at
- * once and placed in the project when their operation ends; the collaboration server stores them,
- * and `saving` says whether it has. It holds nothing of this machine's store: the board can neither
- * be written there nor take part in what is kept there (history, other boards, pictures).
+ * The target of a shared project's board (see openCollab). Its edits put nodes on the board, change
+ * them and take them off (see edits.ts for what it takes); each is shown at once and written to the
+ * project as one edit when its operation ends, and undo takes back this page's own edits only. The
+ * collaboration server stores them, and `saving` says whether it has. It holds nothing of this
+ * machine's store: the board can neither be written there nor take part in what is kept there
+ * (history, other boards, pictures).
  */
 export function sharedTarget(projectId: string, project: SharedProject, host: Host): Target {
   /** The board of the project on screen (see open). */
   let board = '';
-  /** Nodes moved by the operation under way: shown here, placed in the project when it ends. */
-  const moved = new Map<string, Pt>();
+  /** The board as the project has it, as last read: what the draft is shown on top of. */
+  let base: Doc | null = null;
+  /** The edit of the operation under way: shown here, written to the project when it ends. */
+  let draft: NodeEdit = noEdit();
   const stop = project.listen(refresh);
 
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
     const s = project.status();
     return {
-      collab: { ...s, project: projectId, boards: project.boards() },
+      collab: { ...s, ...project.steps(board), project: projectId, boards: project.boards(), takes: sharedTakes },
       saving: s.failure ? 'error' : s.pending ? 'saving' : 'saved',
       saveError: s.failure,
     };
   }
 
-  /** Put the board on screen as the project has it now, with the moves under way here on top. */
+  /** The board as shown: as the project has it, with the edit under way here on top, and each legend as tall as its rows. */
+  function view(): Doc {
+    return shareIds(fitLegends(withEdit(base!, draft)));
+  }
+
+  /**
+   * Put the board on screen as the project has it now, with the edit under way here on top. What
+   * others took off the board leaves the selection.
+   */
   function refresh(): void {
     const s = host.get();
     const fresh = project.board(board);
-    const next = fresh && (moved.size ? withMoves(fresh, moved) : fresh);
-    const doc = next && !sameBoard(next, s.doc) ? next : s.doc;
+    if (fresh && !sameBoard(fresh, base)) base = reuse(base, fresh);
+    const shown = view();
+    const doc = sameBoard(shown, s.doc) ? s.doc : shown;
     const selection = stillIn(doc, s.selection);
     host.set({ doc, ...(selection.length === s.selection.length ? {} : { selection }), ...status() });
   }
 
-  /** Place the nodes the operation just ended moved, as one edit of the project (sent to be stored). */
-  function placeMoved(): void {
-    const fresh = project.board(board);
-    const moves = new Map(
-      [...moved].filter(([node, at]) => {
-        const n = fresh?.nodes.find((x) => x.id === node);
-        return !!n && (n.x !== at.x || n.y !== at.y);
-      }),
-    );
-    moved.clear();
-    if (moves.size) project.place(board, moves);
-    else refresh();
+  /** Write the edit of the operation just ended to the project, as one edit (sent to be stored). */
+  function write(): void {
+    const edit = draft;
+    draft = noEdit();
+    if (!isNoEdit(edit)) project.edit(board, edit);
+    refresh();
+  }
+
+  /** Undo or redo this page's last edit of the board: what others did stays. */
+  function step(way: 'undo' | 'redo'): void {
+    project[way](board);
+    refresh();
   }
 
   return {
     edits: {
-      takes: (what) => what === 'select' || what === 'pan',
+      takes: sharedTakes,
       edit(next, record) {
-        const moves = movesBetween(host.get().doc, next);
-        if (!moves) return host.refuse();
-        if (!moves.size) return;
-        const alone = record || !host.operating();
-        if (alone) host.checkpoint();
-        for (const [node, at] of moves) moved.set(node, at);
-        host.set({ doc: withMoves(host.get().doc, moves) });
-        if (alone) host.commitOperation();
+        const edit = editBetween(host.get().doc, next);
+        if (!edit) return host.refuse();
+        if (isNoEdit(edit)) return;
+        // Not made an operation of its own: that would be a step of its own to undo, where a board of
+        // this machine adds it to the last (the presses of a key held down are one move).
+        if (!record && !host.operating()) {
+          project.edit(board, edit, true);
+          return refresh();
+        }
+        if (record) host.checkpoint();
+        draft = mergeEdits(draft, edit);
+        host.set({ doc: view() });
+        if (record) host.commitOperation();
       },
       // Not undone by putting back a whole earlier board: that would undo others' edits too.
       begin: () => {},
-      end: placeMoved,
+      end: write,
       drop() {
-        moved.clear();
+        draft = noEdit();
         refresh();
         host.set({ selection: [], editing: null });
         return true;
       },
-      undo: host.refuse,
-      redo: host.refuse,
+      undo: () => step('undo'),
+      redo: () => step('redo'),
       // Nothing of it is kept here: a return to it goes through its project.
       keepSteps: () => {},
     },
@@ -126,7 +145,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         if (!doc) return false;
         host.commitOperation();
         board = next;
-        host.set({ doc, viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
+        base = doc;
+        host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
         host.opened();
         return true;
       },
@@ -138,7 +158,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       address: () => showSharedAddress(projectId),
     },
     local: null,
-    refusal: COLLAB_ONLY,
+    refusal: NOT_TAKEN,
     close() {
       stop();
       project.close();
@@ -146,27 +166,16 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   };
 }
 
-/** Whether two objects hold the very same values (by reference) under every key but `skip`. */
-function sameExcept(a: object, b: object, skip: readonly string[]): boolean {
-  const x = a as Record<string, unknown>;
-  const y = b as Record<string, unknown>;
-  return [...Object.keys(x), ...Object.keys(y)].every((k) => skip.includes(k) || x[k] === y[k]);
-}
-
 /**
- * The nodes `to` puts elsewhere than `from`, or null when `to` changes anything but where nodes are.
- * An edit makes new objects only for what it changes, so all else is compared by reference.
+ * `next`, with the nodes that did not change kept as the objects `prev` has: read anew from the
+ * project, every node is a new object, and the canvas redraws what it is handed anew.
  */
-function movesBetween(from: Doc, to: Doc): Map<string, Pt> | null {
-  if (to.nodes.length !== from.nodes.length || !sameExcept(from, to, ['nodes'])) return null;
-  const moves = new Map<string, Pt>();
-  for (const [i, n] of to.nodes.entries()) {
-    const was = from.nodes[i];
-    if (n === was) continue;
-    if (!sameExcept(was, n, ['x', 'y'])) return null;
-    if (n.x !== was.x || n.y !== was.y) moves.set(n.id, { x: n.x, y: n.y });
-  }
-  return moves;
+function reuse(prev: Doc | null, next: Doc): Doc {
+  if (!prev) return next;
+  const was = new Map(prev.nodes.map((n) => [n.id, n]));
+  const nodes = next.nodes.map((n) => {
+    const old = was.get(n.id);
+    return old && JSON.stringify(old) === JSON.stringify(n) ? old : n;
+  });
+  return { ...next, nodes };
 }
-
-const withMoves = (doc: Doc, moves: ReadonlyMap<string, Pt>): Doc => ({ ...doc, nodes: doc.nodes.map((n) => (moves.has(n.id) ? { ...n, ...moves.get(n.id)! } : n)) });

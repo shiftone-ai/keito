@@ -4,6 +4,7 @@
  *
  *   serve [--port 1235] [--host 0.0.0.0]        run the server
  *   init <案件名> [--board <ボード名>]            make a shared project (one board, one shape)
+ *        [--kind system|software|free]           … the kind of board (default: free)
  *   grant <案件 id>                              make an editor's credential for the project
  *         [--server ws://…] [--app http://…]    … and print the link that joins it
  *   delete <案件 id>                             delete the project (its clients are let go)
@@ -16,6 +17,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { sharedAddress } from '../../src/collab/join';
+import { type BoardKind, KIND_ORDER } from '../../src/model/kinds';
 import { collabServer } from './server';
 import { openStore } from './store';
 
@@ -26,10 +28,15 @@ const { values, positionals } = parseArgs({
     port: { type: 'string' },
     host: { type: 'string' },
     board: { type: 'string' },
+    kind: { type: 'string' },
     server: { type: 'string' },
     app: { type: 'string' },
   },
 });
+
+/** The kinds of board a new shared project may begin with: a sequence board has no shapes to share yet. */
+const INIT_KINDS: readonly BoardKind[] = KIND_ORDER.filter((k) => k !== 'sequence');
+const isInitKind = (kind: string): kind is BoardKind => INIT_KINDS.includes(kind as BoardKind);
 
 const folder = resolve(values.data ?? process.env.KEITO_COLLAB_DATA ?? 'collab-data');
 mkdirSync(folder, { recursive: true });
@@ -58,8 +65,10 @@ if (command === 'serve') {
   process.once('SIGINT', () => void stop());
   process.once('SIGTERM', () => void stop());
 } else if (command === 'init') {
-  if (!arg?.trim()) fail('案件名を指定してください: init <案件名> [--board <ボード名>]');
-  const seed = store.initProject({ title: arg.trim(), board: values.board?.trim() || '配置', shape: '図形' });
+  if (!arg?.trim()) fail(`案件名を指定してください: init <案件名> [--board <ボード名>] [--kind ${INIT_KINDS.join('|')}]`);
+  const kind = values.kind ?? 'free';
+  if (!isInitKind(kind)) fail(`ボードの種類が正しくありません: ${kind}（${INIT_KINDS.join('・')} のどれか）`);
+  const seed = store.initProject({ title: arg.trim(), board: values.board?.trim() || '配置', shape: '図形', kind });
   store.close();
   console.log(`案件を作りました: ${seed.title}\nproject: ${seed.id}\nboard: ${seed.board.id}`);
 } else if (command === 'grant') {

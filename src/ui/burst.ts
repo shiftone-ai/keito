@@ -17,3 +17,24 @@ export function useBurst(): () => void {
     last.current = now;
   };
 }
+
+/**
+ * One undo step for what is typed into a field between focusing it and leaving it (or pressing Enter
+ * in a one-line field). The step ends there, and a shared board sends the change then.
+ */
+export function useFieldBurst(): { begin(): void; change(): void; end(): void } {
+  const dirty = useRef(false);
+  return {
+    begin: () => void (dirty.current = false),
+    change() {
+      if (dirty.current) return;
+      dirty.current = true;
+      useStore.getState().checkpoint();
+    },
+    end() {
+      if (!dirty.current) return;
+      dirty.current = false;
+      useStore.getState().commitOperation();
+    },
+  };
+}

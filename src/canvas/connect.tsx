@@ -1,6 +1,7 @@
 // Where a line being drawn or re-attached will go: the box, port or line under the pointer, and its preview.
 import { anchorOf, edgeNear, type Dir, nodeAt, nodeRect, pathD, portAt, routeEdges, sideOf, sidePoint, snap } from '../model/geometry';
-import { type CreateKind, allIds, claimPort, junctionSignal, makeEdge, makeNode } from '../model/presets';
+import { allIds } from '../model/ids';
+import { type CreateKind, claimPort, junctionSignal, makeEdge, makeNode } from '../model/presets';
 import { traceRoute } from '../model/trace';
 import { type Doc, type Edge, type EdgeEnd, type Node, type Pt, type Rect } from '../model/types';
 import { EdgeView, SCREEN } from './render';

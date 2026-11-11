@@ -19,7 +19,7 @@ import { safeName } from '../src/model/names';
 import { drawingOf, entryFor, fingerprint, labelOf, thin } from '../src/model/history';
 import { kindOf } from '../src/model/kinds';
 import { boardKind, readBoard, readSerial } from '../src/model/load';
-import { randomId } from '../src/model/presets';
+import { randomId } from '../src/model/ids';
 import { registerSignals } from '../src/model/signals';
 import { type Doc, type Revision, emptyMeta } from '../src/model/types';
 import { updateWorkbook, workbook } from '../src/export/xlsx';

@@ -6,13 +6,14 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { openStore } from '../server/collab/store';
 import type { ProjectSeed } from '../src/collab/model';
+import type { Doc } from '../src/model/types';
 
 /** A new data folder for the collaboration server, holding one project and an editor's credential for it. */
-export function seedData(): { data: string; seed: ProjectSeed; token: string } {
+export function seedData(kind?: Doc['kind']): { data: string; seed: ProjectSeed; token: string } {
   const data = mkdtempSync(join(tmpdir(), 'keito-collab-'));
   const store = openStore(join(data, 'keito-collab.sqlite'));
   try {
-    const seed = store.initProject({ title: '共有テスト', board: '配置', shape: '図形' });
+    const seed = store.initProject({ title: '共有テスト', board: '配置', shape: '図形', kind });
     return { data, seed, token: store.addGrant(seed.id).token };
   } finally {
     store.close();

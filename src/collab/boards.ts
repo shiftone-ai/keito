@@ -10,10 +10,10 @@
  * changes what the board holds, not the marks, so it does not bring the board back either.
  */
 import * as Y from 'yjs';
+import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
 import { boardKind } from '../model/load';
 import type { Doc } from '../model/types';
-import { uniqueId } from './id';
 
 export interface SharedBoardInfo {
   id: string;
@@ -88,7 +88,7 @@ export function putBoard(ydoc: Y.Doc, board: { id: string; title: string; kind: 
 
 /** Add an empty board to the project, under a new id, as one transaction under `origin`. Returns the id. */
 export function addBoard(ydoc: Y.Doc, board: { title: string; kind: BoardKind }, origin: unknown): string {
-  const id = uniqueId();
+  const id = uuid();
   ydoc.transact(() => putBoard(ydoc, { id, ...board }), origin);
   return id;
 }
@@ -101,7 +101,7 @@ export function renameBoard(ydoc: Y.Doc, id: string, title: string, origin: unkn
 
 /** Mark a board deleted. What it holds is kept, for `restoreBoard`. */
 export function deleteBoard(ydoc: Y.Doc, id: string, origin: unknown): void {
-  if (yBoard(ydoc, id) && !isDeleted(ydoc, id)) ydoc.transact(() => deletions(ydoc).set(uniqueId(), id), origin);
+  if (yBoard(ydoc, id) && !isDeleted(ydoc, id)) ydoc.transact(() => deletions(ydoc).set(uuid(), id), origin);
 }
 
 /**

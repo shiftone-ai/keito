@@ -1,10 +1,12 @@
 import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
+import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
-import type { Doc, Pt } from '../model/types';
-import { type SharedBoardInfo, addBoard, boardList, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
-import { uniqueId } from './id';
-import { SCHEMA, boardDoc, placeNodes, projectTitle, renameProject } from './model';
+import type { Doc } from '../model/types';
+import { type SharedBoardInfo, addBoard, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
+import type { NodeEdit } from './edits';
+import { SCHEMA, boardDoc, projectTitle, renameProject } from './model';
+import { writeEdit } from './nodes';
 import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
 
 /** Where a shared project is, and the credential that lets this client in. */
@@ -45,17 +47,26 @@ const refusalOf = (reason: string): LinkRefusal => (Object.hasOwn(REFUSALS, reas
 /** A Yjs update failing to store is tried again after these waits, the last one repeated. */
 const RETRY_MS = [2_000, 5_000, 10_000, 30_000];
 
+/** How far this client can go back and forth through its own edits of a board. */
+export interface Steps {
+  undo: boolean;
+  redo: boolean;
+}
+
 /**
- * A connection to one shared project. Edits are made through it (`place`) and kept until the server
- * confirms them stored; an edit that fails to store is sent again, under the same op id, until it is.
- * Updates from others change the Y.Doc and are heard through `listen`; they are never sent back as
- * edits of this client.
+ * A connection to one shared project. Edits are made through it (`edit`, `undo`, `redo`) and kept
+ * until the server confirms them stored; an edit that fails to store is sent again, under the same
+ * op id, until it is. Updates from others change the Y.Doc and are heard through `listen`; they are
+ * never sent back as edits of this client, nor undone by it.
  */
 export function joinProject(join: SharedJoin) {
   const ydoc = new Y.Doc();
-  const local = Symbol('local edit');
+  /** This page's own edits of the drawing: what its undo takes back. */
+  const drawing = Symbol('drawing edit');
   /** Board and project management: committed like the drawing's edits, under an origin of its own so that undoing the drawing never takes it back. */
   const manage = Symbol('board management');
+  /** Per board, what this client did there, to be undone: its own drawing edits, nothing else. */
+  const histories = new Map<string, Y.UndoManager>();
   const pending = new Map<string, Uint8Array>();
   const listeners = new Set<() => void>();
   const status: Omit<ShareStatus, 'pending'> = { link: 'connecting', failure: null, refusal: null };
@@ -140,13 +151,28 @@ export function joinProject(join: SharedJoin) {
   }
 
   ydoc.on('update', (update: Uint8Array, origin: unknown) => {
-    if (origin === local || origin === manage) {
-      const op = uniqueId();
+    if (origin === drawing || origin === manage || origin instanceof Y.UndoManager) {
+      const op = uuid();
       pending.set(op, update);
       send(op, update);
     }
     notify();
   });
+
+  /** A board's nodes, with their history begun before the first edit here so that the edit is in it. */
+  function tracked(board: string): { nodes: Y.Map<unknown>; history: Y.UndoManager } | null {
+    const nodes = boardNodes(ydoc, board);
+    if (!nodes) return null;
+    let history = histories.get(board);
+    // Not kept for nodes made anew (the board taken off and put back): it would take back edits of nodes no longer there.
+    if (!history || history.scope[0] !== nodes) {
+      history?.destroy();
+      // Not grouped by how soon edits follow each other: each is a step of its own unless it joins the last (see edit).
+      history = new Y.UndoManager(nodes, { trackedOrigins: new Set([drawing]), captureTimeout: Infinity });
+      histories.set(board, history);
+    }
+    return { nodes, history };
+  }
 
   return {
     /**
@@ -166,9 +192,26 @@ export function joinProject(join: SharedJoin) {
       listeners.add(hear);
       return () => void listeners.delete(hear);
     },
-    /** Put nodes of a board where they were let go: one edit, confirmed once stored. */
-    place(board: string, moves: ReadonlyMap<string, Pt>): void {
-      if (editing() && moves.size) placeNodes(ydoc, board, moves, local);
+    /** Make an edit of a board: one commit confirmed once stored, and a step to undo of its own or, `joins`, part of this client's last. */
+    edit(board: string, edit: NodeEdit, joins = false): void {
+      const at = editing() ? tracked(board) : null;
+      if (!at) return;
+      if (!joins) at.history.stopCapturing();
+      ydoc.transact(() => writeEdit(at.nodes, edit), drawing);
+    },
+    /**
+     * Take back this client's last edit of a board still to be seen there: what others did since,
+     * there or to the same nodes, stays. An edit whose nodes others have taken off is passed over.
+     */
+    undo(board: string): void {
+      if (editing()) tracked(board)?.history.undo();
+    },
+    redo(board: string): void {
+      if (editing()) tracked(board)?.history.redo();
+    },
+    steps(board: string): Steps {
+      const h = editing() ? histories.get(board) : null;
+      return { undo: !!h?.canUndo(), redo: !!h?.canRedo() };
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {
@@ -198,6 +241,7 @@ export function joinProject(join: SharedJoin) {
       closed = true;
       clearTimeout(retryTimer);
       listeners.clear();
+      histories.forEach((h) => h.destroy());
       provider.destroy();
       ydoc.destroy();
     },
