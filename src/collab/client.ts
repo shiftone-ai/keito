@@ -167,7 +167,8 @@ export function joinProject(join: SharedJoin) {
     // Not kept for nodes made anew (the board taken off and put back): it would take back edits of nodes no longer there.
     if (!history || history.scope[0] !== nodes) {
       history?.destroy();
-      history = new Y.UndoManager(nodes, { trackedOrigins: new Set([drawing]), captureTimeout: 0 });
+      // Not grouped by how soon edits follow each other: each is a step of its own unless it joins the last (see edit).
+      history = new Y.UndoManager(nodes, { trackedOrigins: new Set([drawing]), captureTimeout: Infinity });
       histories.set(board, history);
     }
     return { nodes, history };
@@ -191,10 +192,12 @@ export function joinProject(join: SharedJoin) {
       listeners.add(hear);
       return () => void listeners.delete(hear);
     },
-    /** Make an edit of a board: one step to undo, one commit confirmed once stored. */
-    edit(board: string, edit: NodeEdit): void {
+    /** Make an edit of a board: one commit confirmed once stored, and a step to undo of its own or, `joins`, part of this client's last. */
+    edit(board: string, edit: NodeEdit, joins = false): void {
       const at = editing() ? tracked(board) : null;
-      if (at) ydoc.transact(() => writeEdit(at.nodes, edit), drawing);
+      if (!at) return;
+      if (!joins) at.history.stopCapturing();
+      ydoc.transact(() => writeEdit(at.nodes, edit), drawing);
     },
     /**
      * Take back this client's last edit of a board still to be seen there: what others did since,

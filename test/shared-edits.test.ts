@@ -186,6 +186,23 @@ describe('basic edits of a shared board', () => {
     expect(c.s().doc.nodes).toEqual(b.s().doc.nodes);
   });
 
+  it('takes back a node moved with a key held down in one step, as on a board of this machine', async () => {
+    const a = await editor();
+    const b = await editor();
+    a.drag(shape(), { x: 240, y: 120 });
+    // As the arrow keys do: the first press a step of its own, the presses that follow at once part of it.
+    const nudge = (record: boolean) => a.s().updateNode(shape(), { x: a.node(shape())!.x + 1 }, record);
+    nudge(true);
+    nudge(false);
+    nudge(false);
+    await until(() => b.node(shape())?.x === 243, 5_000, 'the moves to reach the other editor');
+
+    a.s().undo();
+    expect(at(a.node(shape()))).toEqual({ x: 240, y: 120 });
+    a.s().undo();
+    expect(at(a.node(shape()))).toEqual({ x: 0, y: 0 });
+  });
+
   it('sends an edit still under way when the page is closed, the browser asking first until it is stored', async () => {
     const a = await editor({ page: true });
     const b = await editor();

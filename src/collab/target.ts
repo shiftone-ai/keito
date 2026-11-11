@@ -93,11 +93,16 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         const edit = editBetween(host.get().doc, next);
         if (!edit) return host.refuse();
         if (isNoEdit(edit)) return;
-        const alone = record || !host.operating();
-        if (alone) host.checkpoint();
+        // Not made an operation of its own: that would be a step of its own to undo, where a board of
+        // this machine adds it to the last (the presses of a key held down are one move).
+        if (!record && !host.operating()) {
+          project.edit(board, edit, true);
+          return refresh();
+        }
+        if (record) host.checkpoint();
         draft = mergeEdits(draft, edit);
         host.set({ doc: view() });
-        if (alone) host.commitOperation();
+        if (record) host.commitOperation();
       },
       // Not undone by putting back a whole earlier board: that would undo others' edits too.
       begin: () => {},
