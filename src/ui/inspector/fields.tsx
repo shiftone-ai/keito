@@ -153,6 +153,8 @@ export function CategoryField({ id, value, onChange, soft }: { id: string; value
             } else if (e.key === 'Enter' && open && hi >= 0 && flat[hi]) {
               e.preventDefault();
               pick(flat[hi]);
+            } else if (e.key === 'Enter') {
+              burst.end();
             } else if (e.key === 'Escape' && open) {
               e.stopPropagation();
               setOpen(false);

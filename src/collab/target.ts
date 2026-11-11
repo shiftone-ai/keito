@@ -8,10 +8,7 @@ import { ask } from '../platform/io';
 import type { SharedProject } from './client';
 import { type NodeEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
 import { showSharedAddress } from './join';
-import { sharedTakes } from './scope';
-
-/** Said when a shared board is asked for an edit it does not take yet. */
-const COLLAB_ONLY = '共有中のボードでは、まだこの編集はできません';
+import { NOT_TAKEN, sharedTakes } from './scope';
 
 /** What the target of a shared board needs of the edit session it is the target of. */
 export interface Host {
@@ -156,7 +153,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       address: () => showSharedAddress(projectId),
     },
     local: null,
-    refusal: COLLAB_ONLY,
+    refusal: NOT_TAKEN,
     close() {
       stop();
       project.close();

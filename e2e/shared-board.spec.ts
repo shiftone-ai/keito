@@ -118,6 +118,11 @@ test('what is typed into a field of a shared board reaches the other browser on 
   await expect(pc(b)).toHaveCount(1);
 
   await clickOn(a, pc(a));
+  // A category typed in rather than picked from the list.
+  await field(a, 'カテゴリ').fill('自作の機材');
+  await field(a, 'カテゴリ').press('Enter');
+  await clickOn(b, pc(b));
+  await expect(field(b, 'カテゴリ')).toHaveValue('自作の機材');
   await field(a, 'IP アドレス').fill('10.0.0.5');
   await field(a, 'IP アドレス').press('Enter');
   await field(a, 'ホスト名').fill('pc-1');
@@ -166,6 +171,20 @@ test('a shared board turns away what it does not take yet, and a board of this m
   const a = await openLink(browser);
   await expect(a.locator('.toolbar button[aria-label="四角"]')).toHaveCount(1);
   for (const tool of ['テキスト', '画像・SVG を埋め込む']) await expect(a.locator(`.toolbar button[aria-label="${tool}"]`)).toHaveCount(0);
+  // Text copied in another app would be pasted as a text box.
+  await a.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData('text/plain', '貼り付けたメモ');
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data }));
+  });
+  await expect(a.locator('.notice')).toHaveText(/共有中のボードでは/);
+  await expect(a.locator('#canvas').getByText('貼り付けたメモ')).toHaveCount(0);
+  // An Alt-drag would leave a copy behind: the shape stays where it is.
+  const at = await placeOf(a);
+  await a.keyboard.down('Alt');
+  await dragShape(a, 120, 80);
+  await a.keyboard.up('Alt');
+  expect(await placeOf(a)).toEqual(at);
   await shape(a).click();
   // Its text is typed by hand: not on a shared board yet. Its look is.
   await expect(a.locator('.inspector label.field', { hasText: 'テキスト' }).locator('textarea')).toBeDisabled();

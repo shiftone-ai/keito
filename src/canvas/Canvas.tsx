@@ -8,7 +8,8 @@ import { type CreateKind, makeEdge, makeImage, makeNode } from '../model/presets
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
-import { type Placing, duplicateInPlace, storeImage, takesIn, useStore, useTakes } from '../model/store';
+import { NOT_TAKEN } from '../collab/scope';
+import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore, useTakes } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
 import { isImageFile, readImageFile } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
@@ -138,6 +139,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
 export function insertText(text: string): void {
   const s = st();
   if (!kindOf(s.doc).tools.includes('text')) return;
+  if (!takesIn(s)('text')) return say(NOT_TAKEN);
   const p = viewCenter();
   const n = makeNode('text', snap(p.x), snap(p.y), allIds(s.doc), text);
   n.h = Math.max(n.h, textHeightFor(n, text));
@@ -704,6 +706,8 @@ export function Canvas() {
       if (d.kind === 'move' && d.dup) {
         // The copies take the originals' places in the drag (in the same undo step).
         const map = duplicateInPlace(s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id)));
+        // No copies made (a shared board takes none yet): moving the originals instead is not what was asked.
+        if (!map.size) return onCancel();
         d.orig = new Map([...d.orig].map(([id, q]) => [map.get(id) ?? id, q]));
         d.routes = new Map([...d.routes].map(([id, r]) => [map.get(id) ?? id, r]));
         d.lead = map.get(d.lead) ?? d.lead;

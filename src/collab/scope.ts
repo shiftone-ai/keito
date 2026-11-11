@@ -53,6 +53,7 @@ const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 't
 /** Whether a shared board takes an edit of this kind. */
 export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
 
-/** The above as the screen says it. */
+/** The above as the screen says it, and what it says when a shared board turns an edit away. */
+export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
 export const SHARED_SO_FAR = '図形や機材を置く・動かす・色などを変える・消す操作';
 export const NOT_SHARED_YET = '名前やメモなどの文字の入力、ポート、線、ボードの設定';
