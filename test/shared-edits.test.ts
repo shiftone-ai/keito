@@ -172,7 +172,8 @@ describe('basic edits of a shared board', () => {
     a.s().redo();
     expect(a.node(shape())).toMatchObject({ x: 240, y: 120, color: 'green' });
 
-    await until(() => b.node(shape())?.x === 240 && !b.node(mine.id), 5_000, 'the undo to reach the other editor');
+    // Not the move alone: the undone add arrives before the undone resize, so the move and the add say nothing of the size.
+    await until(() => b.node(shape())?.x === 240 && b.node(shape())?.w === 160 && !b.node(mine.id), 5_000, 'the undo to reach the other editor');
     expect(b.node(shape())).toMatchObject({ x: 240, y: 120, w: 160, h: 80, color: 'green' });
     expect(b.node(theirs.id)).toBeDefined();
     b.s().undo();
