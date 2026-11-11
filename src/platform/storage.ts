@@ -172,13 +172,16 @@ function freeRoom(): boolean {
   return false;
 }
 
+/** Whether a write to this browser's storage failed for want of room (each browser names it its own way). */
+export const isQuotaError = (e: unknown): boolean => e instanceof DOMException && /quota/i.test(e.name + e.message);
+
 /** Write to this browser's storage, making room as needed; throws only when nothing more can go. */
 function setRoomy(k: string, value: string): void {
   for (;;) {
     try {
       return localStorage.setItem(k, value);
     } catch (e) {
-      if (!(e instanceof DOMException) || !/quota/i.test(e.name + e.message) || !freeRoom()) throw e;
+      if (!isQuotaError(e) || !freeRoom()) throw e;
     }
   }
 }

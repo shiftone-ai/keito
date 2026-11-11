@@ -76,13 +76,24 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     return { version: 1, id: projectId, meta: { title: '', project: project.title() }, nodes: [], edges: [] };
   }
 
+  /**
+   * Saving fails when the server cannot store the edits, or when edits it has not stored cannot be
+   * kept on this device either (they are then in this page alone).
+   */
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
     const s = project.status();
+    const unkept = s.pending > 0 && s.device === 'failed';
     return {
-      collab: { ...s, ...project.steps(board), project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: tabs.manage },
-      saving: s.failure ? 'error' : s.pending ? 'saving' : 'saved',
-      saveError: s.failure,
+      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: tabs.manage },
+      saving: s.failure || unkept ? 'error' : s.pending ? 'saving' : 'saved',
+      saveError: unkept ? s.deviceFailure : s.failure,
     };
+  }
+
+  /** Whether nothing would be lost if the page closed now: every edit stored by the server, or kept on this device. */
+  function safe(): boolean {
+    const s = project.status();
+    return !s.pending || s.device === 'saved';
   }
 
   /** The board as shown: as the project has it, with the edit under way here on top, and each legend as tall as its rows. */
@@ -177,7 +188,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     saving: {
       async flush() {
         host.commitOperation();
-        return !project.status().pending;
+        return safe();
       },
       async saveNow() {
         host.commitOperation();
@@ -186,10 +197,13 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       },
       async leave() {
         const { pending, link } = project.status();
-        // Turned away, the project stores nothing more: asking would offer no way to keep it.
-        return !pending || link === 'refused' || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
+        // Turned away, the project stores nothing more, and its copy here is not sent (see kept.ts): asking would offer no way to keep it.
+        if (!pending || link === 'refused') return true;
+        if (!safe()) return ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
+        host.say(`未送信の変更 ${pending} 件は、この共有案件を次に開いたときに送ります`);
+        return true;
       },
-      closing: () => project.status().pending > 0,
+      closing: () => !safe(),
       // Nothing can go out as the page goes: `closing` has the browser ask about what is not stored yet.
       exit: () => {},
       // What fails in this machine's store says nothing of what the server has stored.

@@ -1,5 +1,6 @@
 import type { ShareStatus, SharedJoin, Steps } from '../collab/client';
 import type { SharedBoardInfo } from '../collab/boards';
+import type { DeviceStore } from '../collab/kept';
 import type { EditKind } from '../collab/scope';
 import type { BoardManagement } from '../collab/tabs';
 import { sharedTarget } from '../collab/target';
@@ -11,6 +12,7 @@ import type { StoreAction, Target } from './target';
 import { create } from 'zustand';
 import { type Backend, type BoardInfo, Conflict, type TrashedBoard, connect, externalize, localBoards } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
+import { browserDevice } from '../platform/indexeddb';
 import { type BoardKind, KINDS, kindOf } from './kinds';
 import { SEQUENCE_SAMPLE } from './sequence';
 import { BOARD_ID, readBoard } from './load';
@@ -83,6 +85,8 @@ export interface CollabState extends ShareStatus, Steps {
   deleted: SharedBoardInfo[];
   /** Adding, renaming and restoring the project's boards, and renaming the project, for everyone in it. */
   manage: BoardManagement;
+  /** Edits the server has not stored are not kept on this device either: they are in this page alone. */
+  unkept: boolean;
   /** What the board takes (see Target.takes), without telling the user anything. */
   takes(what: EditKind): boolean;
 }
@@ -189,8 +193,12 @@ export interface State {
   openAt(boardId: string, nodeId: string): void;
 }
 
-/** A session owns its editor, pending work and page subscriptions. */
-export function createEditSession(options: { page?: boolean } = {}) {
+/**
+ * A session owns its editor, pending work and page subscriptions. `page`: the session is the page's
+ * (it follows and shows the address, and hears the page close). `device`: where shared projects are
+ * kept on this device; unset, this browser's (none outside one).
+ */
+export function createEditSession(options: { page?: boolean; device?: DeviceStore | null } = {}) {
   let disposed = false;
   let generation = 0;
   const active = (): boolean => !disposed;
@@ -833,7 +841,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
     const { joinProject, refusalText } = await import('../collab/client');
     if (!current()) return false;
-    const project = joinProject(join);
+    const project = joinProject(join, options.device === undefined ? browserDevice : options.device);
     try {
       await project.ready;
     } catch (e) {

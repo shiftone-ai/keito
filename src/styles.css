@@ -117,13 +117,27 @@ textarea:focus {
   display: flex;
   flex-direction: column;
 }
+/* Too narrow for all of it, the bar goes on in a second row: no word of it is broken over lines. */
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+}
+.topbar > *,
+.topbar-end > * {
+  flex: none;
+  white-space: nowrap;
+}
+/* The panels and export: kept together at the right end, in a row of their own if need be. */
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 .topbar .logo {
   font-size: 18px;
@@ -1070,12 +1084,26 @@ td.empty {
 }
 .save-state {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--sub);
   margin-left: 4px;
 }
+.save-state small {
+  display: block;
+  font-size: 10px;
+}
 .save-state.error {
+  /* Not left inline: the button would drop below a two-line state and push the board down. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
   color: var(--danger);
   font-weight: 600;
+}
+.save-state.error small {
+  color: var(--ink);
+  font-weight: 400;
 }
 .save-state.conflict {
   display: inline-flex;
@@ -1093,7 +1121,6 @@ td.empty {
   padding: 2px 8px;
 }
 .save-state.error button {
-  margin-left: 6px;
   font-weight: 400;
 }
 

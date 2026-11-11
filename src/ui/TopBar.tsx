@@ -2,7 +2,7 @@ import { ProjectMenu } from './ProjectMenu';
 import { fromYaml } from '../model/dsl';
 import { SHARED_SO_FAR } from '../collab/scope';
 import { randomId } from '../model/ids';
-import { emptyDoc, saveNow, useStore, useTakes } from '../model/store';
+import { type CollabState, type State, emptyDoc, saveNow, useStore, useTakes } from '../model/store';
 import { tidy } from '../model/tidy';
 import { kindOf } from '../model/kinds';
 import { openComments } from '../model/comments';
@@ -54,6 +54,37 @@ function UpdateButton() {
       {ICON.update}
       {label}
     </button>
+  );
+}
+
+/**
+ * The save state of a shared project's board: saved once the collaboration server has stored the
+ * edits, not when it has them; until then, whether this device keeps them.
+ */
+function SharedSaveState({ collab, saving, saveError, project }: { collab: CollabState; saving: State['saving']; saveError: string | null; project: string }) {
+  const { pending, link, device, unkept } = collab;
+  const shared = `共有中の案件「${project}」（試験中: ${SHARED_SO_FAR}を共有します）`;
+  const [text, tip] = unkept
+    ? ['本端末に保存できていません', saveError ?? '理由は不明']
+    : saving === 'error'
+      ? ['共同編集先に保存できていません', `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。`]
+      : pending && link !== 'online'
+        ? [`オフライン・未送信 ${pending} 件`, shared]
+        : [pending ? '共同編集先に保存中…' : link !== 'online' ? 'オフライン' : '共同編集先に保存済み', shared];
+  const note = unkept
+    ? `閉じると未送信の ${pending} 件が失われます`
+    : // Not said while the server is storing the edits as usual: the line would come and go with each edit.
+      pending > 0 && device === 'saved' && (saving === 'error' || link !== 'online')
+      ? '本端末に保存済み'
+      : null;
+  return (
+    <span className={`save-state ${saving}`} title={tip}>
+      <span>
+        {text}
+        {note && <small>{note}</small>}
+      </span>
+      {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
+    </span>
   );
 }
 
@@ -114,11 +145,7 @@ export function TopBar() {
       </button>
       <span className="sep" />
       {collab ? (
-        // A shared project's board: saved when the collaboration server has stored the edits, not when it has them.
-        <span className={`save-state ${saving}`} title={saving === 'error' ? `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。` : `共有中の案件「${doc.meta.project}」（試験中: ${SHARED_SO_FAR}を共有します）`}>
-          {saving === 'error' ? '共同編集先に保存できていません' : collab.pending && collab.link !== 'online' ? `オフライン・未送信 ${collab.pending} 件` : collab.pending ? '共同編集先に保存中…' : collab.link !== 'online' ? 'オフライン' : '共同編集先に保存済み'}
-          {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
-        </span>
+        <SharedSaveState collab={collab} saving={saving} saveError={saveError} project={doc.meta.project} />
       ) : saving === 'gone' ? (
         // Deleted elsewhere (another tab, the command line) while it was open here.
         <span className="save-state conflict">
@@ -144,23 +171,24 @@ export function TopBar() {
           {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
         </span>
       )}
-      <span className="grow" />
-      <UpdateButton />
-      {/* Panels that open beside the drawing, then the one thing the board is made for: export. */}
-      {kind.lists.length > 0 && (
-        <button className={`ghost${docks.lists ? ' on' : ''}`} onClick={() => st().setDock('lists')}>
-          {ICON.table}
-          {kind.listsLabel}
+      <div className="topbar-end">
+        <UpdateButton />
+        {/* Panels that open beside the drawing, then the one thing the board is made for: export. */}
+        {kind.lists.length > 0 && (
+          <button className={`ghost${docks.lists ? ' on' : ''}`} onClick={() => st().setDock('lists')}>
+            {ICON.table}
+            {kind.listsLabel}
+          </button>
+        )}
+        <button className={`ghost${docks.comments ? ' on' : ''}`} onClick={() => st().setDock('comments')} data-tip="付箋（コメント）の一覧">
+          {ICON.comment}
+          コメント{comments > 0 && <b className="count">{comments}</b>}
         </button>
-      )}
-      <button className={`ghost${docks.comments ? ' on' : ''}`} onClick={() => st().setDock('comments')} data-tip="付箋（コメント）の一覧">
-        {ICON.comment}
-        コメント{comments > 0 && <b className="count">{comments}</b>}
-      </button>
-      <button className="primary export-btn" onClick={() => st().setPanel('export')}>
-        {ICON.download}
-        エクスポート
-      </button>
+        <button className="primary export-btn" onClick={() => st().setPanel('export')}>
+          {ICON.download}
+          エクスポート
+        </button>
+      </div>
     </header>
   );
 }
