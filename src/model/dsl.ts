@@ -9,7 +9,7 @@ import { upgradeOrder } from './lists';
 import { boardKind } from './load';
 import { KINDS } from './kinds';
 import { upgradeDoc } from './video';
-import type { ColorKey, CustomSignal, DeviceNode, Doc, Edge, EdgeEnd, FillStyle, FrameNode, Node, ShapeKind } from './types';
+import { type ColorKey, type CustomSignal, type DeviceNode, type Doc, type Edge, type EdgeEnd, type FillStyle, type FrameNode, type Node, SHAPE_KINDS, type ShapeKind } from './types';
 import { PALETTE } from './signals';
 
 /** Schema reference shown in the editor and given to the AI. */
@@ -297,7 +297,6 @@ export function toYaml(doc: Doc): string {
 }
 
 const HEX = /^#[0-9a-f]{3,8}$/i;
-const SHAPES: ShapeKind[] = ['rect', 'round', 'diamond', 'ellipse', 'cloud'];
 const DEFAULT_SIZE: Record<string, [number, number]> = {
   rect: [140, 60],
   round: [140, 50],
@@ -439,7 +438,7 @@ function readYaml(src: string, prev: Doc, relayout: boolean): Doc {
     else if (kind === 'text') nodes.push({ ...base, type: 'text', fontSize, bold });
     else {
       const fill = ['solid', 'outline', 'none'].includes(str(v.fill)) ? (str(v.fill) as FillStyle) : undefined;
-      nodes.push({ ...base, type: 'shape', shape: SHAPES.includes(kind as ShapeKind) ? (kind as ShapeKind) : 'rect', color: color ?? 'white', fill, dash: v.dash === true || undefined, fontSize, bold });
+      nodes.push({ ...base, type: 'shape', shape: SHAPE_KINDS.includes(kind as ShapeKind) ? (kind as ShapeKind) : 'rect', color: color ?? 'white', fill, dash: v.dash === true || undefined, fontSize, bold });
     }
     if (v.area) areaHint.set(id, str(v.area));
   });

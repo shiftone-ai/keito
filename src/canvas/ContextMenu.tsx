@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { copySelection, duplicateSelection, pasteClipboard, restack, useStore } from '../model/store';
+import { copySelection, duplicateSelection, pasteClipboard, restack, useStore, useTakes } from '../model/store';
 import { isUnderlay } from '../model/geometry';
 import { copyText, shortcuts } from '../platform/io';
 
@@ -21,7 +21,7 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
   });
   const selection = useStore((s) => s.selection);
   const nodes = useStore((s) => s.doc.nodes.filter((n) => s.selection.includes(n.id)).length);
-  const shared = useStore((s) => !!s.collab);
+  const takes = useTakes();
   useEffect(() => {
     const away = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
@@ -67,18 +67,18 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
           {item('切り取り', '⌘X', () => {
             copy();
             st().removeIds(st().selection);
-          }, !nodes || shared)}
+          }, !nodes)}
         </>
       )}
-      {item('貼り付け', '⌘V', () => pasteClipboard(), shared)}
+      {item('貼り付け', '⌘V', () => pasteClipboard(), !takes('copying'))}
       {selection.length > 0 && (
         <>
-          {item('複製', '⌘D', () => duplicateSelection(), !nodes || shared)}
+          {item('複製', '⌘D', () => duplicateSelection(), !nodes || !takes('copying'))}
           <hr />
-          {item('最前面へ', '', () => restack('front'), !nodes || shared)}
-          {item('最背面へ', '', () => restack('back'), !nodes || shared)}
+          {item('最前面へ', '', () => restack('front'), !nodes || !takes('restack'))}
+          {item('最背面へ', '', () => restack('back'), !nodes || !takes('restack'))}
           <hr />
-          {item('削除', 'Delete', () => st().removeIds(st().selection), shared)}
+          {item('削除', 'Delete', () => st().removeIds(st().selection))}
         </>
       )}
       {selection.length === 0 && item('すべて選択', '⌘A', () => st().select([...st().doc.nodes.filter((n) => !isUnderlay(n)).map((n) => n.id), ...st().doc.edges.map((e) => e.id)]))}

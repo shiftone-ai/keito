@@ -3,7 +3,7 @@ import { deviceRows, legendRows } from '../../model/legend';
 import { deviceTint } from '../../model/signals';
 import { readImageFile } from '../../platform/storage';
 import { tell } from '../../platform/io';
-import { storeImage, useStore } from '../../model/store';
+import { storeImage, useStore, useTakes } from '../../model/store';
 import { type Node, type ShapeKind, type StickyNode } from '../../model/types';
 import { FILLS, FillPreview, SHAPES, sizesFor } from '../icons';
 import { useBurst } from '../burst';
@@ -13,6 +13,7 @@ import { DevicePanel } from './DevicePanel';
 export function NodePanel({ n }: { n: Node }) {
   const patch = (p: Partial<Node>, record = false) => useStore.getState().updateNode(n.id, p, record);
   const burst = useBurst();
+  const takes = useTakes();
   if (n.type === 'device') return <DevicePanel key={n.id} n={n} />;
   if (n.type === 'sequence') {
     return (
@@ -66,14 +67,14 @@ export function NodePanel({ n }: { n: Node }) {
       <div key={key} className={`legend-row${hidden ? ' off' : ''}`}>
         <input type="checkbox" checked={!hidden} title={hidden ? 'この行を凡例に出す' : 'この行を凡例から外す'} onChange={(e) => show(key, e.target.checked)} />
         <span className="swatch" style={swatch} />
-        <input value={n.names?.[key] ?? ''} placeholder={usual} onChange={(e) => rename(key, e.target.value)} />
+        <input value={n.names?.[key] ?? ''} placeholder={usual} disabled={!takes('typing')} onChange={(e) => rename(key, e.target.value)} />
       </div>
     );
     return (
       <>
         <Head title="凡例" id={n.id} />
         <Section title="見出し">
-          <Field label="空にすると見出しを出しません" value={n.text} onChange={(v) => patch({ text: v })} />
+          <Field freeText label="空にすると見出しを出しません" value={n.text} onChange={(v) => patch({ text: v })} />
         </Section>
         <Section title="線" note="チェックを外すと出しません">
           {rows.map((r) => row(r.color, r.hidden, r.usual, { background: r.color }))}
@@ -174,7 +175,7 @@ export function NodePanel({ n }: { n: Node }) {
     <>
       <Head title={n.type === 'shape' ? '図形' : n.type === 'sticky' ? '付箋（コメント）' : n.type === 'frame' ? 'エリア枠' : 'テキスト'} id={n.id} />
       <Section title={n.type === 'sticky' ? 'コメント' : '内容'}>
-        <Field label={n.type === 'frame' ? 'エリア名（機材リストの設置場所になります）' : 'テキスト'} value={n.text} onChange={(v) => patch({ text: v })} multiline={n.type !== 'frame'} />
+        <Field freeText label={n.type === 'frame' ? 'エリア名（機材リストの設置場所になります）' : 'テキスト'} value={n.text} onChange={(v) => patch({ text: v })} multiline={n.type !== 'frame'} />
         {n.type === 'sticky' && (
           <>
             <PinNote n={n} />

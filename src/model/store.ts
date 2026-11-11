@@ -1,5 +1,6 @@
-import type { ShareStatus, SharedJoin } from '../collab/client';
+import type { ShareStatus, SharedJoin, Steps } from '../collab/client';
 import type { SharedBoardInfo } from '../collab/boards';
+import type { EditKind } from '../collab/scope';
 import { sharedTarget } from '../collab/target';
 import { localEdits } from './edits';
 import { fitLegends } from './legend';
@@ -19,6 +20,9 @@ import { sampleBoards } from './sample';
 import { registerSignals } from './signals';
 import { type Entry, type ShareNode, catalog, newKey, pull, stamp, takeFrom } from './shared';
 import { type Doc, type Edge, type Node, type Rect, type Revision, type UserPreset, emptyMeta } from './types';
+
+/** A board of this machine takes every edit. */
+const takesAll = (): boolean => true;
 
 export type Tool = 'select' | 'pan' | 'rect' | 'round' | 'diamond' | 'ellipse' | 'cloud' | 'sticky' | 'text' | 'frame' | 'sequence';
 /** A window over the board (one at a time). */
@@ -68,11 +72,14 @@ function showInUrl(id: string): void {
 
 /**
  * The shared project whose board is on screen (see openCollab), how this page stands with its
- * server, and the project's boards (its tabs).
+ * server, the project's boards (its tabs), and whether this page's own edits of the board on screen
+ * can be undone or redone.
  */
-export interface CollabState extends ShareStatus {
+export interface CollabState extends ShareStatus, Steps {
   project: string;
   boards: SharedBoardInfo[];
+  /** What the board takes (see Target.takes), without telling the user anything. */
+  takes(what: EditKind): boolean;
 }
 
 export interface EditOperation {
@@ -552,7 +559,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   /** Whether the board on screen takes a tool armed, or text typed in; the user is told when not. */
-  function takes(what: Tool | 'typing'): boolean {
+  function takes(what: EditKind): boolean {
     if (target.edits.takes(what)) return true;
     refuse();
     return false;
@@ -1329,6 +1336,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   const flushBeforeClose = (): Promise<boolean> => target.saving.flush();
 
   onWindow('beforeunload', (e) => {
+    commitOperation();
     if (!target.saving.closing()) return;
     e.preventDefault();
     e.returnValue = '';
@@ -1354,6 +1362,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * the undo step (the drag's). Says which copy is which: node and line ids, old → new.
    */
   function duplicateInPlace(ids: string[]): Map<string, string> {
+    if (!takes('copying')) return new Map();
     const s = useStore.getState();
     const keep = new Set(ids);
     const taken = allIds(s.doc);
@@ -1386,7 +1395,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   function duplicateSelection(offset = 30): void {
     const s = useStore.getState();
     const ids = s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id));
-    if (!ids.length) return;
+    if (!ids.length || !takes('copying')) return;
     s.checkpoint();
     const map = duplicateInPlace(ids);
     const copies = new Set(map.values());
@@ -1403,7 +1412,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * away), they go to the middle of the view instead.
    */
   function pasteClipboard(): void {
-    if (!clipboard) return;
+    if (!clipboard || !takes('copying')) return;
     const s = useStore.getState();
     const offset = pasteShift(clipboard.nodes, s.view);
     const taken = allIds(s.doc);
@@ -1524,3 +1533,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
 /** The page's editor. */
 export const defaultSession = createEditSession({ page: true });
 export const { useStore, boot, openCollab, boardLoading, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align } = defaultSession;
+
+/** What the board of a state takes (see Target.takes), without telling the user anything. */
+export const takesIn = (s: Pick<State, 'collab'>): ((what: EditKind) => boolean) => s.collab?.takes ?? takesAll;
+/** What the board on screen takes: the screen does not offer the rest (hidden or disabled rather than turned away when used). */
+export const useTakes = (): ((what: EditKind) => boolean) => useStore(takesIn);

@@ -1,4 +1,5 @@
-import { align, useStore } from '../model/store';
+import { NOT_SHARED_YET } from '../collab/scope';
+import { align, useStore, useTakes } from '../model/store';
 import { Section, Head } from './inspector/fields';
 import { MetaPanel } from './inspector/MetaPanel';
 import { NodePanel } from './inspector/NodePanel';
@@ -9,6 +10,7 @@ export function Inspector() {
   const selection = useStore((s) => s.selection);
   const viewing = useStore((s) => !!s.viewing);
   const collab = useStore((s) => !!s.collab);
+  const takes = useTakes();
   const remove = () => useStore.getState().removeIds(selection);
   const lines = doc.edges.filter((e) => selection.includes(e.id)).length;
   let body;
@@ -38,15 +40,10 @@ export function Inspector() {
     );
   }
   // An old state from the history, on screen, is for looking at: what is selected there is shown, not edited.
-  const locked = collab
-    ? `共有中の案件「${doc.meta.project}」のボードです。試験中のため、ほかの人と共有できるのは図形の移動だけです。`
-    : viewing && selection.length > 0
-      ? '履歴の版を表示中は編集できません。編集するには、上の帯で「この時点に戻す」か「現在の図に戻る」を選んでください。'
-      : null;
-  if (locked)
+  if (viewing && selection.length > 0)
     return (
       <aside className="inspector">
-        <p className="hint">{locked}</p>
+        <p className="hint">履歴の版を表示中は編集できません。編集するには、上の帯で「この時点に戻す」か「現在の図に戻る」を選んでください。</p>
         <fieldset className="plain" disabled>
           {body}
         </fieldset>
@@ -54,7 +51,14 @@ export function Inspector() {
     );
   return (
     <aside className="inspector">
-      {body}
+      {collab && <p className="hint">共有中の案件「{doc.meta.project}」のボードです。試験中のため、{NOT_SHARED_YET}は、まだ共有できません。</p>}
+      {!takes('settings') && !selection.length ? (
+        <fieldset className="plain" disabled>
+          {body}
+        </fieldset>
+      ) : (
+        body
+      )}
       {selection.length > 0 && <button className="danger wide" onClick={remove}>削除</button>}
     </aside>
   );

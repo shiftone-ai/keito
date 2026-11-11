@@ -64,6 +64,15 @@ export function endDrag(d: Drag | null): void {
   if (d && 'moved' in d && d.moved) st().commitOperation();
 }
 
+/**
+ * Whether the node a move was grabbed by, or the node being resized, is no longer on the board:
+ * taken off by someone else, on a shared board. What else a move carries may go without ending it.
+ */
+export function lostTarget(doc: Doc, d: Drag): boolean {
+  const id = d.kind === 'move' ? d.lead : d.kind === 'resize' ? d.id : null;
+  return id !== null && !doc.nodes.some((n) => n.id === id);
+}
+
 export const portOf = (doc: Doc, end: EdgeEnd) => {
   const n = doc.nodes.find((x) => x.id === end.node);
   return n?.type === 'device' ? n.ports.find((p) => p.id === end.port) : undefined;

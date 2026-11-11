@@ -1,7 +1,7 @@
 import { upgradeHistory } from './history';
 import { KINDS } from './kinds';
 import { upgradeOrder } from './lists';
-import type { Doc, Edge, Node } from './types';
+import type { DeviceNode, Doc, Edge, Node } from './types';
 import { upgradeDoc } from './video';
 
 /**
@@ -19,6 +19,13 @@ export const BOARD_ID = /^(?!.*__)[A-Za-z0-9_-]{1,64}$/;
 
 const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const finite = (x: unknown, or = 0): number => (typeof x === 'number' && Number.isFinite(x) ? x : or);
+
+/** A device with its particulars filled in, and each port with a name, a side and a signal (one without an id left out). */
+export function wholeDevice(n: DeviceNode): DeviceNode {
+  const ports = Array.isArray(n.ports) ? n.ports.filter((p) => isObject(p) && typeof p.id === 'string') : [];
+  const fill = { maker: n.maker ?? '', model: n.model ?? '', category: n.category ?? '', note: n.note ?? '' };
+  return { ...n, ...fill, ports: ports.map((p) => ({ ...p, name: typeof p.name === 'string' ? p.name : '', side: p.side === 'left' ? 'left' : 'right', signal: typeof p.signal === 'string' ? p.signal : 'other' })) };
+}
 
 /**
  * A board as written by hand or by another tool, made safe to draw: what is not a node or a line
@@ -43,12 +50,7 @@ function sanitize(d: Doc): void {
       const text = typeof n.text === 'string' ? n.text : '';
       const same = id === n.id && text === n.text && box.x === n.x && box.y === n.y && box.w === n.w && box.h === n.h;
       let out = same ? n : ({ ...n, id, text, ...box } as Node);
-      if (out.type === 'device') {
-        const ports = Array.isArray(out.ports) ? out.ports.filter((p) => isObject(p) && typeof p.id === 'string') : [];
-        const fill = { maker: out.maker ?? '', model: out.model ?? '', category: out.category ?? '', note: out.note ?? '' };
-        if (ports !== out.ports || Object.entries(fill).some(([k, v]) => (out as unknown as Record<string, unknown>)[k] !== v)) out = { ...out, ...fill, ports: ports.map((p) => ({ ...p, name: typeof p.name === 'string' ? p.name : '', side: p.side === 'left' ? 'left' : 'right', signal: typeof p.signal === 'string' ? p.signal : 'other' })) };
-      }
-      return out;
+      return out.type === 'device' ? wholeDevice(out) : out;
     });
   const nodes = new Set(d.nodes.map((n) => n.id));
   const end = (x: unknown) => isObject(x) && typeof x.node === 'string' && nodes.has(x.node);

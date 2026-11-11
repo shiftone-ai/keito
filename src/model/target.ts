@@ -1,5 +1,6 @@
 import type { Backend } from '../platform/storage';
-import type { State, Tool } from './store';
+import type { EditKind } from '../collab/scope';
+import type { State } from './store';
 import type { Doc } from './types';
 
 /** An action on a board in this machine's store; `current` turns false once another board is on screen. */
@@ -29,8 +30,8 @@ export interface Target {
 
 /** Editing the board: what it takes, an edit, an operation's beginning, end or calling off, and undo. */
 export interface Edits {
-  /** Whether it takes a tool armed, or text typed in ('typing'). It tells the user nothing (see Target.refusal). */
-  takes(what: Tool | 'typing'): boolean;
+  /** Whether it takes an edit of this kind (a tool armed, text typed in, copies made …). It tells the user nothing (see Target.refusal). */
+  takes(what: EditKind): boolean;
   /** An edit of the board (setDoc); `record` makes it an operation of its own. */
   edit(next: Doc, record: boolean): void;
   /** An operation begins on the board as it is now (checkpoint). */

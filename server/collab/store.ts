@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import * as Y from 'yjs';
 import { type ProjectSeed, SCHEMA, seedProject } from '../../src/collab/model';
+import type { Doc } from '../../src/model/types';
 
 const digest = (token: string): string => createHash('sha256').update(token).digest('hex');
 
@@ -81,12 +82,12 @@ export function openStore(file: string) {
   };
 
   return {
-    /** Make a new project with one board holding one shape; returns the ids it was given. */
-    initProject(input: { title: string; board: string; shape: string }): ProjectSeed {
+    /** Make a new project with one board (a free board unless `kind` says) holding one shape; returns the ids it was given. */
+    initProject(input: { title: string; board: string; shape: string; kind?: Doc['kind'] }): ProjectSeed {
       const seed: ProjectSeed = {
         id: randomUUID(),
         title: input.title,
-        board: { id: randomUUID(), title: input.board },
+        board: { id: randomUUID(), title: input.board, kind: input.kind },
         shape: { id: randomUUID(), text: input.shape, x: 0, y: 0, w: 160, h: 80 },
       };
       const ydoc = new Y.Doc();
