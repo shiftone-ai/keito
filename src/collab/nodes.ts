@@ -1,29 +1,22 @@
 import * as Y from 'yjs';
 import { wholeDevice } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
-import { FILL_STYLES, type Node, type Port, SHAPE_KINDS } from '../model/types';
-import type { BoardEdit, Change, Items } from './edits';
+import { FILL_STYLES, type Node, SHAPE_KINDS } from '../model/types';
+import type { BoardEdit, Change } from './edits';
+import { type Check, type YMap, isBoolean, isNumber, isString, oneOf, orderRange, textOf } from './entries';
+import { putPorts, readPorts, writePorts } from './ports';
 import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
 
 /**
  * A node of a shared board as the project holds it (see model.ts for the rest of the project):
  *
  * node:   Y.Map { id, type, order, pos: {x, y}, size: {w, h}, text: Y.Text, …its attributes }
- * device: … note: Y.Text, ports: Y.Map<port id, Y.Map { id, name: Y.Text, side, signal, order }>
+ * device: … note: Y.Text, ports (see ports.ts)
  * legend: … names: Y.Map<row, Y.Text>, hidden: Y.Map<row, true>
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
- * attributes of one node keep all their changes; so is a port's, and each port is an entry of its
- * own, so ports two people add to one device at once are both kept. What is typed by hand is a Y.Text.
+ * attributes of one node keep all their changes. What is typed by hand is a Y.Text.
  */
-
-export type YMap = Y.Map<unknown>;
-export type Check = (v: unknown) => boolean;
-
-export const oneOf = (values: readonly unknown[]): Check => (v) => values.includes(v);
-export const isNumber: Check = (v) => typeof v === 'number' && Number.isFinite(v);
-export const isString: Check = (v) => typeof v === 'string';
-export const isBoolean: Check = (v) => typeof v === 'boolean';
 
 /** What a value written under each attribute must be to be read back: anything else is left unread. */
 const CHECKS = {
@@ -56,35 +49,6 @@ const DEFAULTS: Partial<Record<SharedType, Record<string, unknown>>> = {
   sticky: { color: 'yellow' },
 };
 
-/** A text the project holds, as typed (a plain string from an older writer is read as it is). */
-export const textOf = (v: unknown, fallback = ''): string => (v instanceof Y.Text ? v.toString() : typeof v === 'string' ? v : fallback);
-export const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-const num = (v: unknown): number => (isNumber(v) ? (v as number) : 0);
-
-/** The place in the order of the entries of a map (the nodes of a board, its lines, a device's ports): lower comes first. */
-export const orderOf = (entry: unknown): number => (entry instanceof Y.Map ? num(entry.get('order')) : 0);
-
-/** The entries of a map read (those not read left out), in their order, then by id, so that every client lists them alike. */
-export function inOrder<T extends { id: string }>(map: YMap, read: (id: string, entry: YMap) => T | null): T[] {
-  const listed: { order: number; item: T }[] = [];
-  map.forEach((entry, id) => {
-    const item = entry instanceof Y.Map ? read(id, entry as YMap) : null;
-    if (item) listed.push({ order: orderOf(entry), item });
-  });
-  return listed.sort((a, b) => a.order - b.order || byId(a.item.id, b.item.id)).map((x) => x.item);
-}
-
-/** The first and the last place in the order of a map's entries (both 0 for none). */
-export function orderRange(map: YMap): { back: number; front: number } {
-  if (!map.size) return { back: 0, front: 0 };
-  let back = Infinity;
-  let front = -Infinity;
-  map.forEach((entry) => {
-    back = Math.min(back, orderOf(entry));
-    front = Math.max(front, orderOf(entry));
-  });
-  return { back, front };
-}
 
 function pair(v: unknown, a: 'x' | 'w', b: 'y' | 'h'): [number, number] | null {
   if (!v || typeof v !== 'object') return null;
@@ -117,17 +81,11 @@ function writeAttribute(node: YMap, key: Attribute, v: unknown): void {
 /** What a kind of node holds besides its text and attributes, each read and written its own way. */
 const PARTS: Partial<Record<SharedType, { read(node: YMap): Record<string, unknown>; write(node: YMap, n: Node): void }>> = {
   device: {
-    read(node) {
-      const held = node.get('ports');
-      const ports = held instanceof Y.Map ? inOrder(held as YMap, (id, p) => ({ id, name: textOf(p.get('name')), side: p.get('side'), signal: p.get('signal') }) as Port) : [];
-      return { note: textOf(node.get('note')), ports };
-    },
+    read: (node) => ({ note: textOf(node.get('note')), ports: readPorts(node) }),
     write(node, n) {
       if (n.type !== 'device') return;
       node.set('note', new Y.Text(n.note));
-      const ports = new Y.Map<unknown>();
-      node.set('ports', ports);
-      n.ports.forEach((p, i) => putPort(ports, p, i));
+      putPorts(node, n.ports);
     },
   },
   legend: {
@@ -186,31 +144,6 @@ function changeNode(node: YMap, change: Change): void {
   if ('x' in change) node.set('pos', { x: change.x, y: change.y });
   if ('w' in change) node.set('size', { w: change.w, h: change.h });
   for (const [key, v] of Object.entries(change)) if (key !== 'x' && key !== 'y' && key !== 'w' && key !== 'h') writeAttribute(node, key as Attribute, v);
-}
-
-/** Write a new port into a device's ports. */
-function putPort(ports: YMap, p: Port, order: number): void {
-  const port = new Y.Map<unknown>();
-  ports.set(p.id, port);
-  port.set('id', p.id);
-  port.set('name', new Y.Text(p.name));
-  port.set('side', p.side);
-  port.set('signal', p.signal);
-  port.set('order', order);
-}
-
-/** Put ports on a device, change and take off ports of it: as writeNodes does nodes. New ports go after the rest. */
-function writePorts(node: YMap, edit: Items<Port>): void {
-  const ports = node.get('ports');
-  if (!(ports instanceof Y.Map)) return;
-  const held = ports as YMap;
-  for (const id of edit.remove) held.delete(id);
-  for (const [id, change] of edit.set) {
-    const port = held.get(id);
-    if (port instanceof Y.Map) for (const [key, v] of Object.entries(change)) port.set(key, v);
-  }
-  let { front } = orderRange(held);
-  for (const p of edit.add) if (!held.has(p.id)) putPort(held, p, ++front);
 }
 
 /**

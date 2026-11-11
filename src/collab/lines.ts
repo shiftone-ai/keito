@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import type { Edge, EdgeEnd, Pt } from '../model/types';
 import type { Change, Items } from './edits';
-import { type Check, type YMap, inOrder, isBoolean, isNumber, isString, oneOf, orderRange, textOf } from './nodes';
+import { type Check, type YMap, isBoolean, isNumber, isString, oneOf, readInOrder, setEach, textOf, writeItems } from './entries';
 import { LINE_ATTRIBUTES, type LineAttribute } from './scope';
 
 /**
@@ -73,7 +73,7 @@ function lineOf(id: string, line: YMap): Edge | null {
 }
 
 /** A board's lines as the project holds them (those not whole left out), in the order they were put there. */
-export const readLines = (lines: YMap): Edge[] => inOrder(lines, lineOf);
+export const readLines = (lines: YMap): Edge[] => readInOrder(lines, lineOf);
 
 function putLine(lines: YMap, e: Edge, order: number): void {
   const line = new Y.Map<unknown>();
@@ -86,27 +86,13 @@ function putLine(lines: YMap, e: Edge, order: number): void {
   for (const key of LINE_ATTRIBUTES) if (e[key] !== undefined) line.set(key, e[key]);
 }
 
+const ENDS = new Set(['from', 'to']);
+
 /** Change attributes of a line in place, each on its own; its ends, both at once. */
 function changeLine(line: YMap, change: Change): void {
   if ('from' in change) line.set('ends', endsOf(change.from, change.to));
-  for (const [key, v] of Object.entries(change)) {
-    if (key === 'from' || key === 'to') continue;
-    if (v === undefined) line.delete(key);
-    else line.set(key, v);
-  }
+  setEach(line, change, ENDS);
 }
 
-/**
- * Write an edit of a board's lines (within the caller's transaction). A change to a line no longer
- * there is dropped, never bringing the line back; a line put there under an id already taken is not
- * written over what holds it. New lines go after the rest.
- */
-export function writeLines(lines: YMap, edit: Items<Edge>): void {
-  for (const id of edit.remove) lines.delete(id);
-  for (const [id, change] of edit.set) {
-    const line = lines.get(id);
-    if (line instanceof Y.Map) changeLine(line, change);
-  }
-  let { front } = orderRange(lines);
-  for (const e of edit.add) if (!lines.has(e.id)) putLine(lines, e, ++front);
-}
+/** Put lines on a board, change and take off lines of it (see writeItems). */
+export const writeLines = (lines: YMap, edit: Items<Edge>): void => writeItems(lines, edit, changeLine, putLine);

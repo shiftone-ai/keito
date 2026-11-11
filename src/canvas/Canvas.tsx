@@ -810,7 +810,7 @@ export function Canvas() {
     }
     setGuides({});
     setBusy(false);
-    // Taken off by someone else since the pointer last moved: the drag ends making nothing, as when it moves.
+    // Checked here too, not only as the pointer moves: let go without moving after the take-off, it would make a line to what is gone.
     if (d && lostTarget(st().doc, d)) return endDrag(d);
     if (d?.kind !== 'segment') endDrag(d);
     if (d?.kind === 'place') {

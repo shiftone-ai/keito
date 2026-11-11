@@ -2,8 +2,9 @@ import * as Y from 'yjs';
 import type { Doc } from '../model/types';
 import { boardLines, boardNodes, liveBoard, putBoard } from './boards';
 import type { BoardEdit } from './edits';
+import { type YMap, readInOrder, textOf } from './entries';
 import { readLines, writeLines } from './lines';
-import { type YMap, inOrder, nodeOf, textOf, writeNodes } from './nodes';
+import { nodeOf, writeNodes } from './nodes';
 import { validDrawing } from './valid';
 
 /**
@@ -74,7 +75,7 @@ export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
     id: boardId,
     kind: board.kind,
     meta: { title: board.title, project: projectTitle(ydoc) },
-    nodes: nodes ? inOrder(nodes, nodeOf) : [],
+    nodes: nodes ? readInOrder(nodes, nodeOf) : [],
     edges: lines ? readLines(lines) : [],
   });
 }

@@ -17,6 +17,12 @@ export interface Items<T> {
   remove: Set<string>;
 }
 
+/** A node an edit puts on the board. `back`: beneath every node already there (an area), else on top. */
+export interface Placed {
+  node: Node;
+  back: boolean;
+}
+
 /**
  * One edit of a shared board: the nodes it puts there, the attributes it changes, the nodes it takes
  * off, and the same of each device's ports and of the lines. A place or a size is changed whole (x
@@ -25,8 +31,7 @@ export interface Items<T> {
  * one line, with the two ends one of them gave it.
  */
 export interface BoardEdit {
-  /** In the order put there. `back`: beneath every node already there (an area), else on top. */
-  add: { node: Node; back: boolean }[];
+  add: Placed[];
   set: Map<string, Change>;
   remove: Set<string>;
   /** Per device, by its id. */
@@ -37,12 +42,12 @@ export interface BoardEdit {
 const noItems = <T>(): Items<T> => ({ add: [], set: new Map(), remove: new Set() });
 const isNoItems = (e: Items<unknown>): boolean => !e.add.length && !e.set.size && !e.remove.size;
 
-export const noEdit = (): BoardEdit => ({ ...noItems<{ node: Node; back: boolean }>(), ports: new Map(), lines: noItems() });
+export const noEdit = (): BoardEdit => ({ ...noItems<Placed>(), ports: new Map(), lines: noItems() });
 
 export const isNoEdit = (e: BoardEdit): boolean => isNoItems(e) && !e.ports.size && isNoItems(e.lines);
 
 const IDENTITY = new Set(['id', 'type']);
-/** A node's ports are read apart (see portChange). */
+/** A device's ports are read apart (see portsBetween). */
 const NODE_APART = new Set([...IDENTITY, 'ports']);
 // A legend is as tall as its rows: each screen works it out, and no one edits it.
 const LEGEND_APART = new Set([...NODE_APART, 'h']);
@@ -136,25 +141,27 @@ export function editBetween(from: Doc, to: Doc): BoardEdit | null {
   const a = from as unknown as Record<string, unknown>;
   const b = to as unknown as Record<string, unknown>;
   for (const key of keysOf(a, b)) if (key !== 'nodes' && key !== 'edges' && !same(a[key], b[key])) return null;
-  const ports = new Map<string, Items<Port>>();
-  const nodes = itemsBetween(
-    from.nodes,
-    to.nodes,
-    (was, now) => {
-      const change = nodeChange(was, now);
-      if (!change || was.type !== 'device' || now.type !== 'device' || was.ports === now.ports) return change;
-      const changed = itemsBetween(was.ports, now.ports, portChange, () => true);
-      if (changed && !isNoItems(changed)) ports.set(now.id, changed);
-      return changed && change;
-    },
-    addable,
-  );
-  const lines = nodes && itemsBetween(from.edges, to.edges, lineChange, lineAddable);
-  if (!nodes || !lines) return null;
-  // Put before every node kept: beneath them all.
-  const kept = new Set(from.nodes.map((n) => n.id));
-  const beneath = new Set(to.nodes.slice(0, Math.max(0, to.nodes.findIndex((n) => kept.has(n.id)))).map((n) => n.id));
-  return { add: nodes.add.map((node) => ({ node, back: beneath.has(node.id) })), set: nodes.set, remove: nodes.remove, ports, lines };
+  const nodes = itemsBetween(from.nodes, to.nodes, nodeChange, addable);
+  const ports = nodes && portsBetween(from.nodes, to.nodes);
+  const lines = ports && itemsBetween(from.edges, to.edges, lineChange, lineAddable);
+  if (!nodes || !ports || !lines) return null;
+  const firstKept = to.nodes.findIndex((n) => !nodes.add.includes(n));
+  const underAll = new Set(to.nodes.slice(0, Math.max(0, firstKept)));
+  return { add: nodes.add.map((node) => ({ node, back: underAll.has(node) })), set: nodes.set, remove: nodes.remove, ports, lines };
+}
+
+/** What changes the ports of each device kept, from `from` to `to` (see itemsBetween); null when one is changed in a way a shared board does not take. */
+function portsBetween(from: readonly Node[], to: readonly Node[]): Map<string, Items<Port>> | null {
+  const before = new Map(from.map((n) => [n.id, n]));
+  const out = new Map<string, Items<Port>>();
+  for (const now of to) {
+    const was = before.get(now.id);
+    if (was?.type !== 'device' || now.type !== 'device' || was.ports === now.ports) continue;
+    const edit = itemsBetween(was.ports, now.ports, portChange, () => true);
+    if (!edit) return null;
+    if (!isNoItems(edit)) out.set(now.id, edit);
+  }
+  return out;
 }
 
 /** `first`, then `second`, as one edit of things of one kind (see BoardEdit for `T` of the nodes). */
@@ -188,7 +195,6 @@ export function mergeEdits(first: BoardEdit, second: BoardEdit): BoardEdit {
     if (added?.type === 'device') nodes.add[i] = { ...nodes.add[i], node: { ...added, ports: withItems(added.ports, edit) } };
     else ports.set(id, mergeItems(ports.get(id) ?? noItems(), edit, (p) => p.id, changedPort));
   }
-  // A device taken off takes its ports with it.
   for (const id of nodes.remove) ports.delete(id);
   return { ...nodes, ports, lines: mergeItems(first.lines, second.lines, (e) => e.id, (e, change) => ({ ...e, ...change }) as Edge) };
 }

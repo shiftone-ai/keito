@@ -176,10 +176,10 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
  */
 function reuse(prev: Doc | null, next: Doc): Doc {
   if (!prev) return next;
-  return { ...next, nodes: kept(prev.nodes, next.nodes), edges: kept(prev.edges, next.edges) };
+  return { ...next, nodes: reused(prev.nodes, next.nodes), edges: reused(prev.edges, next.edges) };
 }
 
-function kept<T extends { id: string }>(prev: readonly T[], next: T[]): T[] {
+function reused<T extends { id: string }>(prev: readonly T[], next: T[]): T[] {
   const was = new Map(prev.map((x) => [x.id, x]));
   return next.map((x) => {
     const old = was.get(x.id);
