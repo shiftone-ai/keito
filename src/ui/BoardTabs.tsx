@@ -39,6 +39,11 @@ export function boardBeside(doc: Doc, boards: BoardInfo[], step: 1 | -1, from?: 
   return tabs[(here + step + tabs.length) % tabs.length].id;
 }
 
+/** The id of the tab at `place` from the left, counted from 0 (−1: the last), or undefined past the last tab. */
+export function boardAt(doc: Doc, boards: BoardInfo[], place: number): string | undefined {
+  return projectTabs(doc, boards).at(place)?.id;
+}
+
 /** The project's boards as tabs under the top bar: one click to another board of the same project. */
 export function BoardTabs() {
   const st = useStore.getState;
