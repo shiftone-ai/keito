@@ -1017,7 +1017,7 @@ td.empty {
 .workbook tr.subtotal.over td {
   background: #fdecec;
 }
-/* Not green-700 (#15803d): 4.46:1 on the sums' grey. */
+/* Not green-700 (#15803d), nor amber-700 below: 4.46:1 on the sums' grey, 4.42:1 on a hovered row. */
 .workbook tr.subtotal td:last-child {
   color: #166534;
 }
@@ -1033,7 +1033,7 @@ td.empty {
   font-weight: 700;
 }
 .workbook tr.note td:first-child {
-  color: #b45309;
+  color: #92400e;
 }
 .workbook .num {
   text-align: right;
