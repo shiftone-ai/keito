@@ -1824,6 +1824,10 @@ body.row-dragging .lists td.editable:hover {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+/* --sub on the chosen card's tint is 4.37:1, short of the 4.5:1 small text needs. */
+.kind-card.on small {
+  color: #475569;
+}
 /* Chosen shown by a mark as well as the colour; aria-pressed says it to a screen reader. */
 .kind-card.on::after {
   content: '✓' / '';
