@@ -45,6 +45,9 @@ const REFUSALS: Record<LinkRefusal, string> = {
   unreachable: '共同編集先に接続できません（サーバーが動いているか、参加リンクのアドレスが正しいかを確かめてください）',
   'no-access': '共有案件に接続できません（参加の権限がないか、案件がありません）',
 };
+/** What the user is told of a link 'refused' for this reason. */
+export const refusalText = (refusal: LinkRefusal): string => REFUSALS[refusal];
+
 // A reason this version does not know (an older or newer server's) is told as the general one.
 const refusalOf = (reason: string): LinkRefusal => (Object.hasOwn(REFUSALS, reason) ? (reason as LinkRefusal) : 'no-access');
 

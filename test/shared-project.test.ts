@@ -208,7 +208,6 @@ describe('a shared project', () => {
     a.s().select([seed.shape.id]);
     a.session.duplicateSelection();
     a.session.restack('front');
-    a.s().deleteBoard(seed.board.id);
     a.s().nameState('提出版');
     // A text box would be nothing there: no text is typed into it yet.
     for (const tool of ['sequence', 'text'] as const) a.s().setTool(tool);

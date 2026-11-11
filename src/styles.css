@@ -1653,10 +1653,10 @@ body.row-dragging .lists td.editable:hover {
   white-space: nowrap;
 }
 .kind-badge.software {
-  background: #ea580c;
+  background: #c2410c;
 }
 .kind-badge.sequence {
-  background: #0d9488;
+  background: #0f766e;
 }
 .kind-badge.free {
   background: #64748b;
@@ -1720,10 +1720,10 @@ body.row-dragging .lists td.editable:hover {
   box-shadow: inset 0 -1px 0 #cbd5e1;
 }
 .board-tabs .board-tab.software {
-  --kind: #ea580c;
+  --kind: #c2410c;
 }
 .board-tabs .board-tab.sequence {
-  --kind: #0d9488;
+  --kind: #0f766e;
 }
 .board-tabs .board-tab.free {
   --kind: #64748b;
@@ -1832,6 +1832,7 @@ body.row-dragging .lists td.editable:hover {
   margin-bottom: 8px;
 }
 .kind-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1849,6 +1850,19 @@ body.row-dragging .lists td.editable:hover {
 .kind-card.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* --sub on the chosen card's tint is 4.37:1, short of the 4.5:1 small text needs. */
+.kind-card.on small {
+  color: #475569;
+}
+/* Chosen shown by a mark as well as the colour; aria-pressed says it to a screen reader. */
+.kind-card.on::after {
+  content: '✓' / '';
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--accent);
+  font-weight: 700;
 }
 .new-board .row input {
   flex: 1;
@@ -2258,6 +2272,58 @@ body.row-dragging .lists td.editable:hover {
   border-top: 1px solid var(--line);
   border-radius: 0;
   color: var(--sub);
+}
+/* A board of a shared project: opened from its face, renamed from its foot */
+.board-card.shared {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.board-card.shared:hover {
+  background: #f1f5f9;
+}
+.board-card.shared.on {
+  border-color: var(--accent);
+}
+.board-card.shared .open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.board-card.shared .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.board-card.shared input {
+  width: 100%;
+}
+.deleted-head {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  color: var(--sub);
+}
+/* A shared project with no board: a board to add, or a deleted one to bring back, in the middle of the canvas */
+.empty-project {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.empty-project .board-cards {
+  width: 100%;
 }
 .board-card.trashed {
   border: 1px dashed var(--line);

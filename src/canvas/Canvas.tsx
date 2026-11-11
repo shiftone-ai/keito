@@ -15,6 +15,8 @@ import { isImageFile, readImageFile } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
 import { EdgeView, HopCaps, INK, LabelChip, NodeView, SCREEN, STICKY_HEAD, TEXT, edgeLabelBox, edgeTags, frameTitleHeight, framesInOrder, textHeightFor, textSize, textWeight, textWidth } from './render';
 import { QuickBar } from '../ui/QuickBar';
+import { openBoards } from '../ui/Boards';
+import { EmptyProject } from '../ui/SharedBoards';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
 import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, lostTarget, st } from './drag';
@@ -246,6 +248,7 @@ export function Canvas() {
   const tool = useStore((s) => s.tool);
   const editing = useStore((s) => s.editing);
   const placing = useStore((s) => s.placing);
+  const collab = useStore((s) => s.collab);
   /** Where the pointer is on the board, while something waits to be placed (its outline follows). */
   const [pointer, setPointer] = useState<Pt | null>(null);
   const [hover, setHover] = useState<string | null>(null);
@@ -1063,7 +1066,7 @@ export function Canvas() {
       {/* Keyed by the selection so an open menu never carries over to another object. */}
       {idle && selection.length > 0 && !menuAt && <QuickBar key={selection.join(',')} />}
       {menuAt && <ContextMenu at={menuAt} close={() => setMenuAt(null)} />}
-      {doc.nodes.length === 0 && !viewing && !placing && <EmptyHint doc={doc} />}
+      {collab && !collab.boards.length ? <EmptyProject collab={collab} add={() => openBoards(true)} /> : doc.nodes.length === 0 && !viewing && !placing && <EmptyHint doc={doc} />}
       {(placing || placesBox(tool)) && !busy && (
         <div className="place-hint">
           {placing ? `「${placing.label}」: 置きたい所をクリック` : tool === 'sequence' ? '置きたい所をクリック' : '置きたい所をクリック、ドラッグで大きさを決めて置く'}
