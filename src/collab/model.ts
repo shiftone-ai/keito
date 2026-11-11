@@ -1,26 +1,22 @@
 import * as Y from 'yjs';
-import { boardKind } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
 import type { Doc, Pt, ShapeKind, ShapeNode } from '../model/types';
+import { boardNodes, liveBoard, putBoard } from './boards';
 
 /**
  * The form of a shared project's Y.Doc that this app reads and writes. A project of another form is
  * not opened (the server turns the connection away, see server/collab/server.ts).
  *
- * project: Y.Map { id, schema, title }
- * boards:  Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map> }>
- * node:    Y.Map { id, type, shape, color, text: Y.Text, pos: {x, y}, size: {w, h}, order }
+ * project:   Y.Map { id, schema, title }
+ * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map> }>
+ * node:      Y.Map { id, type, shape, color, text: Y.Text, pos: {x, y}, size: {w, h}, order }
+ * deletions: Y.Map<mark, board id>
  *
  * A node's position and size are each one value: two editors moving it at once end with one of
- * their positions, never the x of one and the y of the other.
+ * their positions, never the x of one and the y of the other. Which boards there are, and how one
+ * stays deleted, is boards.ts's.
  */
 export const SCHEMA = 1;
-
-export interface SharedBoardInfo {
-  id: string;
-  title: string;
-  kind: Doc['kind'];
-}
 
 export interface ProjectSeed {
   id: string;
@@ -30,11 +26,9 @@ export interface ProjectSeed {
 }
 
 const META = 'project';
-const BOARDS = 'boards';
 const SHAPES: ShapeKind[] = ['rect', 'round', 'diamond', 'ellipse', 'cloud'];
 
 type YNode = Y.Map<unknown>;
-type YBoard = Y.Map<unknown>;
 
 /** Write a new project into an empty Y.Doc: its id, schema and title, and one board holding one shape. */
 export function seedProject(ydoc: Y.Doc, seed: ProjectSeed): void {
@@ -43,13 +37,7 @@ export function seedProject(ydoc: Y.Doc, seed: ProjectSeed): void {
     meta.set('id', seed.id);
     meta.set('schema', SCHEMA);
     meta.set('title', seed.title);
-    const nodes = new Y.Map<YNode>();
-    const board = new Y.Map<unknown>();
-    board.set('id', seed.board.id);
-    board.set('title', seed.board.title);
-    board.set('kind', 'free');
-    board.set('nodes', nodes);
-    ydoc.getMap<YBoard>(BOARDS).set(seed.board.id, board);
+    const nodes = putBoard(ydoc, { ...seed.board, kind: 'free' });
     const { id, text, x, y, w, h } = seed.shape;
     const node = new Y.Map<unknown>();
     nodes.set(id, node);
@@ -73,13 +61,12 @@ const pair = (v: unknown, a: 'x' | 'w', b: 'y' | 'h'): [number, number] | null =
 };
 const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/** The project's boards, in a fixed order (by title, then id) so every client lists them alike. */
-export function boardList(ydoc: Y.Doc): SharedBoardInfo[] {
-  const out: SharedBoardInfo[] = [];
-  ydoc.getMap<unknown>(BOARDS).forEach((board, id) => {
-    if (board instanceof Y.Map) out.push({ id, title: str(board.get('title')), kind: boardKind(board.get('kind')) });
-  });
-  return out.sort((a, b) => a.title.localeCompare(b.title, 'ja') || byId(a.id, b.id));
+/** The project's name. */
+export const projectTitle = (ydoc: Y.Doc): string => str(ydoc.getMap<unknown>(META).get('title'));
+
+/** Rename the project. Its id, and so where it is shared, stays the same. */
+export function renameProject(ydoc: Y.Doc, title: string, origin: unknown): void {
+  if (projectTitle(ydoc) !== title) ydoc.transact(() => ydoc.getMap<unknown>(META).set('title', title), origin);
 }
 
 function shapeOf(id: string, node: YNode): ShapeNode | null {
@@ -103,25 +90,24 @@ function shapeOf(id: string, node: YNode): ShapeNode | null {
 }
 
 /**
- * A board as the drawing, the tables and the exports read it. Nodes come in their drawing order (by
- * `order`, then id); a node of a kind this version cannot show is left out rather than guessed at.
+ * A board as the drawing, the tables and the exports read it; null for one deleted, or not in the
+ * project. Nodes come in their drawing order (by `order`, then id); a node of a kind this version
+ * cannot show is left out rather than guessed at.
  */
 export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
-  const board = ydoc.getMap<unknown>(BOARDS).get(boardId);
-  if (!(board instanceof Y.Map)) return null;
-  const nodes = board.get('nodes');
+  const board = liveBoard(ydoc, boardId);
+  if (!board) return null;
   const listed: { order: number; node: ShapeNode }[] = [];
-  if (nodes instanceof Y.Map)
-    nodes.forEach((value, id) => {
-      const node = value instanceof Y.Map ? shapeOf(id, value as YNode) : null;
-      if (node) listed.push({ order: num((value as YNode).get('order')), node });
-    });
+  boardNodes(ydoc, boardId)?.forEach((value, id) => {
+    const node = value instanceof Y.Map ? shapeOf(id, value as YNode) : null;
+    if (node) listed.push({ order: num((value as YNode).get('order')), node });
+  });
   listed.sort((a, b) => a.order - b.order || byId(a.node.id, b.node.id));
   return {
     version: 1,
     id: boardId,
-    kind: boardKind(board.get('kind')),
-    meta: { title: str(board.get('title')), project: str(ydoc.getMap<unknown>(META).get('title')) },
+    kind: board.kind,
+    meta: { title: board.title, project: projectTitle(ydoc) },
     nodes: listed.map((x) => x.node),
     edges: [],
   };
@@ -132,9 +118,8 @@ export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
  * on the board is not brought back by being moved.
  */
 export function placeNodes(ydoc: Y.Doc, boardId: string, moves: ReadonlyMap<string, Pt>, origin: unknown): void {
-  const board = ydoc.getMap<unknown>(BOARDS).get(boardId);
-  const nodes = board instanceof Y.Map ? board.get('nodes') : null;
-  if (!(nodes instanceof Y.Map)) return;
+  const nodes = boardNodes(ydoc, boardId);
+  if (!nodes) return;
   ydoc.transact(() => {
     for (const [id, { x, y }] of moves) {
       const node = nodes.get(id);

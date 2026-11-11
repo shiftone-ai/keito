@@ -7,6 +7,10 @@
  * keeps it until the server answers. The server stores the edit, then answers `saved`; a commit it
  * has already stored is answered `saved` again without being stored twice. `failed` says the store
  * failed (the client sends it again later); `refused` says the edit cannot be read.
+ *
+ * The server tells every client of a project when the project is deleted (`deleted`), answering an
+ * edit sent to it or unasked: the edit is not stored, and the client leaves the project, as it would
+ * on being turned away for that reason when connecting.
  */
 export interface Commit {
   type: 'commit';
@@ -14,6 +18,14 @@ export interface Commit {
   update: Uint8Array;
 }
 export type Answer = { type: 'saved'; op: string } | { type: 'failed'; op: string; reason: string } | { type: 'refused'; op: string; reason: string };
+
+/**
+ * Why the server turns a client away, sent as the reason of the provider's authenticationFailed event:
+ * `deleted`, the project has been deleted; `schema`, the project is of a form the client does not
+ * read; `no-access`, anything else (no grant for the project, or no such project: a client without a
+ * grant is not told which).
+ */
+export type Refusal = 'deleted' | 'schema' | 'no-access';
 
 /** What a client presents on connecting: the grant's secret, and the schema it reads and writes. */
 export interface Credential {
@@ -65,6 +77,11 @@ export function readAnswer(text: string): Answer | null {
   if ((v.type === 'failed' || v.type === 'refused') && typeof v.reason === 'string') return { type: v.type, op: v.op, reason: v.reason };
   return null;
 }
+
+export const writeDeleted = (): string => JSON.stringify({ type: 'deleted' });
+
+/** Whether a message from the server says the project has been deleted. */
+export const readDeleted = (text: string): boolean => parse(text)?.type === 'deleted';
 
 export const writeCredential = (credential: Credential): string => JSON.stringify(credential);
 
