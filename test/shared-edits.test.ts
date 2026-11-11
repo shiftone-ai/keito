@@ -163,18 +163,24 @@ describe('basic edits of a shared board', () => {
     // What the other editor did is no reason to forget what this one did.
     expect(a.s().collab?.undo).toBe(true);
 
+    // Each step is waited for on the other editor, not only the last: on the way there, it shows a
+    // state that looks like the end (the shape at x 240 still with its new size).
+    const reaches = (seen: () => boolean, step: string) => until(seen, 5_000, `${step} to reach the other editor`);
     a.s().undo();
     expect(a.node(mine.id)).toBeUndefined();
     expect(a.node(theirs.id)).toBeDefined();
+    await reaches(() => !b.node(mine.id), 'the first undo');
     a.s().undo();
     expect(a.node(shape())).toMatchObject({ x: 240, y: 120, w: 160, h: 80, color: 'green' });
+    await reaches(() => b.node(shape())?.w === 160, 'the second undo');
     a.s().undo();
     expect(a.node(shape())).toMatchObject({ x: 0, y: 0, color: 'green' });
     expect(a.s().collab?.undo).toBe(false);
+    await reaches(() => b.node(shape())?.x === 0, 'the third undo');
     a.s().redo();
     expect(a.node(shape())).toMatchObject({ x: 240, y: 120, color: 'green' });
+    await reaches(() => b.node(shape())?.x === 240, 'the redo');
 
-    await until(() => b.node(shape())?.x === 240 && !b.node(mine.id), 5_000, 'the undo to reach the other editor');
     expect(b.node(shape())).toMatchObject({ x: 240, y: 120, w: 160, h: 80, color: 'green' });
     expect(b.node(theirs.id)).toBeDefined();
     b.s().undo();
