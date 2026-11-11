@@ -1762,7 +1762,6 @@ body.row-dragging .lists td.editable:hover {
   background: transparent;
   border-style: dashed dashed none;
   box-shadow: none;
-  color: var(--sub);
   font-size: 15px;
 }
 .board-tabs .board-tab.add:hover {

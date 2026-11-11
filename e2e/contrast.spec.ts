@@ -1,9 +1,11 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
 /**
- * The text in a part of the page that is below WCAG's contrast for its size: 4.5:1, or 3:1 from 24px
- * (18.66px bold). Its background is what is painted under it, half-transparent ones laid over white.
- * Text a disabled control dims needs no contrast.
+ * Each text in `part` short of WCAG's contrast for its size (4.5:1; 3:1 from 24px, or 18.66px bold),
+ * as "element 「text」 ratio". Reads only text nodes (not input values, placeholders or `::after`),
+ * and skips text that is not shown or that a disabled control holds. The colour is taken with its
+ * elements' opacity; the background is the elements' background colours under it, over white
+ * (background images and siblings drawn underneath are not seen).
  */
 function faintText(part: Locator): Promise<string[]> {
   return part.evaluate((root) => {
@@ -12,7 +14,10 @@ function faintText(part: Locator): Promise<string[]> {
       const [r, g, b, a = 1] = css.match(/[\d.]+/g)!.map(Number);
       return [r, g, b, a];
     };
-    const over = (top: Rgba, under: Rgba): Rgba => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat(1) as Rgba;
+    const over = (top: Rgba, under: Rgba): Rgba => {
+      const mix = (i: number) => top[i] * top[3] + under[i] * (1 - top[3]);
+      return [mix(0), mix(1), mix(2), 1];
+    };
     const luminance = (c: Rgba) => {
       const [r, g, b] = c.slice(0, 3).map((v) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
       return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -24,19 +29,26 @@ function faintText(part: Locator): Promise<string[]> {
         if (bg[3] > 0) layers.unshift(bg);
         if (bg[3] >= 1) break;
       }
-      return layers.reduce((c, layer) => over(layer, c), [255, 255, 255, 1] as Rgba);
+      return layers.reduce((c, layer) => over(layer, c), [255, 255, 255, 1]);
+    };
+    const opacity = (el: Element) => {
+      let o = 1;
+      for (let e: Element | null = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
+      return o;
     };
     const faint: string[] = [];
     for (const el of root.querySelectorAll('*')) {
       const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('').trim();
       const style = getComputedStyle(el);
-      if (!text || !el.getClientRects().length || style.visibility === 'hidden' || el.closest(':disabled, [aria-disabled="true"]')) continue;
+      const shown = opacity(el);
+      if (!text || !el.getClientRects().length || style.visibility === 'hidden' || !shown || el.closest(':disabled, [aria-disabled="true"]')) continue;
       const bg = under(el);
-      const [a, b] = [luminance(over(rgba(style.color), bg)), luminance(bg)].sort((x, y) => y - x);
-      const ratio = (a + 0.05) / (b + 0.05);
+      const [r, g, b, a] = rgba(style.color);
+      const [x, y] = [luminance(over([r, g, b, a * shown], bg)), luminance(bg)].sort((p, q) => q - p);
+      const ratio = (x + 0.05) / (y + 0.05);
       const px = parseFloat(style.fontSize);
       const large = px >= 24 || (Number(style.fontWeight) >= 700 && px >= 18.66);
-      if (ratio < (large ? 3 : 4.5)) faint.push(`「${text}」 ${ratio.toFixed(2)}:1`);
+      if (ratio < (large ? 3 : 4.5)) faint.push(`${[el.tagName.toLowerCase(), ...el.classList].join('.')} 「${text}」 ${ratio.toFixed(2)}:1`);
     }
     return faint;
   });
@@ -44,12 +56,14 @@ function faintText(part: Locator): Promise<string[]> {
 
 async function open(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.locator('.save-state')).toHaveText('フォルダに保存済み');
+  // Not the 5 s default: as the first spec of a run on a loaded machine, it has waited longer than that.
+  await expect(page.locator('.save-state')).toHaveText('フォルダに保存済み', { timeout: 30_000 });
 }
 
-test('the board settings, the board list, the search and the list tabs keep their small grey text readable on their tints', async ({ page }) => {
+test('the board settings, the tab strip, the board list, the search and the list tabs keep their text at WCAG contrast', async ({ page }) => {
   await open(page);
   expect.soft(await faintText(page.locator('aside.inspector'))).toEqual([]);
+  expect.soft(await faintText(page.locator('nav.board-tabs'))).toEqual([]);
 
   await page.getByRole('button', { name: '新しいボード' }).first().click();
   await expect(page.locator('.modal.boards .kind-card.on')).toBeVisible();
