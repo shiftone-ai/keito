@@ -3,7 +3,8 @@
   --panel: #ffffff;
   --line: #e2e8f0;
   --ink: #1e293b;
-  --sub: #64748b;
+  /* Not slate-500 (#64748b): on the panels' tints and a chosen row's blue it is 4.3–4.4:1, short of the 4.5:1 small text needs. */
+  --sub: #5b6b81;
   --accent: #2563eb;
   --accent-soft: #eff6ff;
   --danger: #dc2626;
@@ -1768,10 +1769,11 @@ body.row-dragging .lists td.editable:hover {
   background: #fff;
   color: var(--accent);
 }
+/* Not --sub: on the strip's grey it is 4.2:1. The tabs' own text colour beside it. */
 .board-tabs-hint {
   align-self: center;
   margin-left: 8px;
-  color: var(--sub);
+  color: #475569;
   font-size: 11.5px;
   white-space: nowrap;
 }
@@ -1850,10 +1852,6 @@ body.row-dragging .lists td.editable:hover {
 .kind-card.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
-}
-/* --sub on the chosen card's tint is 4.37:1, short of the 4.5:1 small text needs. */
-.kind-card.on small {
-  color: #475569;
 }
 /* Chosen shown by a mark as well as the colour; aria-pressed says it to a screen reader. */
 .kind-card.on::after {
@@ -2096,8 +2094,9 @@ body.row-dragging .lists td.editable:hover {
   flex-shrink: 0;
   align-self: center;
 }
+/* Not green-600 (#16a34a): 3.1:1 on the panel's tint. */
 .settled {
-  color: #16a34a;
+  color: #15803d;
   font-weight: 700;
   margin-right: auto;
 }
@@ -2186,7 +2185,8 @@ body.row-dragging .lists td.editable:hover {
   padding: 0 4px;
   border-radius: 8px;
   background: #f59e0b;
-  color: #fff;
+  /* Not white: 2.2:1 on the amber. */
+  color: var(--ink);
   font-size: 10.5px;
   line-height: 16px;
   text-align: center;
@@ -2665,9 +2665,10 @@ button.project-item {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Not inherited: the blue and the grey text around it are 3.8–4.2:1 on the yellow. */
 .search-hit mark {
   background: #fde68a;
-  color: inherit;
+  color: var(--ink);
   border-radius: 2px;
   padding: 0 1px;
 }
