@@ -6,7 +6,7 @@ import { cableIds, idShown, labelStacked, lengthShown, protocolShown } from '../
 import { kindOf } from '../../model/kinds';
 import { signalOf } from '../../model/signals';
 import { linkClick } from '../../platform/io';
-import { useStore } from '../../model/store';
+import { useStore, useTakes } from '../../model/store';
 import { type Arrow, type Edge } from '../../model/types';
 import { useBurst } from '../burst';
 import { Field, Section, Head, SignalSelect, SignalHowTo, NewSignal, LabelSizeField } from './fields';
@@ -21,8 +21,11 @@ export function EdgePanel({ e }: { e: Edge }) {
   const autoId = useStore((s) => cableIds({ ...s.doc, edges: s.doc.edges.map((x) => (x.id === e.id ? { ...x, cableId: undefined } : x)) }).get(e.id) ?? '');
   const color = useStore((s) => lineColor(s.doc, e));
   const custom = useStore((s) => !!s.doc.signalColors?.[e.signal]);
+  const takes = useTakes();
   // Cables are colour-coded by type; arrows one by one.
-  const [all, setAll] = useState(e.signal !== 'flow');
+  const [allWanted, setAll] = useState(e.signal !== 'flow');
+  // The colour of a type is a setting of the board: where those are not taken, the colour goes to this line alone.
+  const all = allWanted && takes('settings');
   const burst = useBurst();
   // A swatch is one step; the picker, dragged round, sends colour after colour: one step for them all.
   const paint = (c: string | null, picker = false) => {
@@ -107,7 +110,7 @@ export function EdgePanel({ e }: { e: Edge }) {
           <span>線の色</span>
           {/* Where the colour goes is settled first, before a swatch is clicked. */}
           <label className="check">
-            <input type="checkbox" checked={all} onChange={(ev) => setAll(ev.target.checked)} />
+            <input type="checkbox" checked={all} disabled={!takes('settings')} onChange={(ev) => setAll(ev.target.checked)} />
             同じ種別（{signalOf(e.signal).label}）の線すべてに適用
           </label>
           <div className="line-colors">
@@ -116,7 +119,7 @@ export function EdgePanel({ e }: { e: Edge }) {
             ))}
             <input type="color" value={color} onChange={(ev) => paint(ev.target.value, true)} title="ほかの色を選ぶ" />
           </div>
-          {(e.color || custom) && (
+          {(e.color || (custom && all)) && (
             <button className="mini" onClick={() => paint(null)}>
               既定の色に戻す
             </button>

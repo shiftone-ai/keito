@@ -290,6 +290,13 @@ test('two browsers show the same lines and cable list, and a line pulled from a 
   expect(listed.join('\n')).toMatch(/PC\tHDMI 1\tプロジェクター\tHDMI/);
   expect(await cables(b, 1)).toEqual(listed);
 
+  // A colour picked for the line just made goes to that line: the colour of all lines of its type is a setting of the board.
+  await a.locator('.inspector .line-colors button[aria-label="#dc2626"]').click();
+  await expect(b.locator('#canvas path[stroke="#dc2626"]')).toHaveCount(1);
+  await a.locator('.quickbar button[data-tip="線の色"]').click();
+  await a.locator('.quickbar .qb-swatches button[aria-label="#16a34a"]').click();
+  await expect(b.locator('#canvas path[stroke="#16a34a"]')).toHaveCount(1);
+
   // Pulled from the PC while the other browser takes the PC off.
   await pullLine(a, output(a, 1), device(a, 'プロジェクター'), async () => {
     await clickOn(b, device(b, 'PC'));
