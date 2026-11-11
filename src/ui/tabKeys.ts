@@ -62,22 +62,26 @@ function tabFinder(e: KeyboardEvent): (() => string | undefined) | undefined {
 /** Whether a mouse button, a finger or a pen is down: a drag of any kind may be under way. */
 let pressed = false;
 
+/**
+ * Open the board a tab key goes to, as a click on its tab does: a field being typed in is blurred,
+ * its edit committed, first. Does nothing during IME conversion, during a drag, or under a dialog or
+ * the project menu.
+ */
 function onTabKey(e: KeyboardEvent): void {
   const findTab = tabFinder(e);
   if (!findTab) return;
-  // Ignored during IME conversion (on the hidden IME field of a selected shape, keyCode 229 alone
-  // tells it, as in App), during a drag, and under a dialog or the project menu.
+  // On the hidden IME field of a selected shape, keyCode 229 alone, not isComposing: Chrome may go
+  // on marking keys as composing after Shift+1's "！" though the IME no longer takes them (as in App).
   const ime = isCatcher(e.target) ? e.keyCode === 229 : composing(e);
   if (ime || pressed || overBoard()) return;
   e.preventDefault();
   e.stopPropagation();
   let to = findTab();
   if (!to) return;
-  // As a click on a tab does, blur the focused field first: its edit is committed, and a project
-  // name just typed there changes the tabs, so the target is computed again.
   const field = document.activeElement;
   if (isField(field)) {
     field.blur();
+    // Found again, not reused: a project name committed by the blur changes the tabs.
     to = findTab();
   }
   if (to) useStore.getState().openBoard(to);
