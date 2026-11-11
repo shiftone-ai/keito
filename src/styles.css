@@ -3,10 +3,12 @@
   --panel: #ffffff;
   --line: #e2e8f0;
   --ink: #1e293b;
-  --sub: #64748b;
+  /* Not slate-500 (#64748b): on the panels' tints and a chosen row's blue it is 4.3–4.4:1, short of the 4.5:1 small text needs. */
+  --sub: #5b6b81;
   --accent: #2563eb;
   --accent-soft: #eff6ff;
-  --danger: #dc2626;
+  /* Not red-600 (#dc2626): 4.2–4.4:1 on the error box, a hovered or chosen row and a hovered tab. */
+  --danger: #b91c1c;
   font-family: -apple-system, 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
   font-size: 13px;
   color: var(--ink);
@@ -1015,22 +1017,23 @@ td.empty {
 .workbook tr.subtotal.over td {
   background: #fdecec;
 }
+/* Not green-700 (#15803d), nor amber-700 below: 4.46:1 on the sums' grey, 4.42:1 on a hovered row. */
 .workbook tr.subtotal td:last-child {
-  color: #15803d;
+  color: #166534;
 }
 .workbook tr.subtotal.over td:last-child {
-  color: #b91c1c;
+  color: var(--danger);
 }
 .workbook tr.subtotal.unknown td:last-child {
   color: var(--sub);
   font-weight: 400;
 }
 .workbook tr.warn td:first-child {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 700;
 }
 .workbook tr.note td:first-child {
-  color: #b45309;
+  color: #92400e;
 }
 .workbook .num {
   text-align: right;
@@ -1326,7 +1329,7 @@ td a {
   color: #15803d;
 }
 .changes li.del b {
-  color: #dc2626;
+  color: var(--danger);
 }
 .changes li.mod b {
   color: #b45309;
@@ -1465,14 +1468,15 @@ td a {
   font-weight: 700;
   border-bottom: 2px solid #cbd5e1;
 }
+/* Not green-700 (#15803d), nor amber-700 below: 4.4:1 on a hovered row. */
 .lists tr.subtotal td:last-child {
-  color: #15803d;
+  color: #166534;
 }
 .lists tr.subtotal.over td {
   background: #fef2f2;
 }
 .lists tr.subtotal.over td:last-child {
-  color: #dc2626;
+  color: var(--danger);
 }
 .lists tr.subtotal.unknown td:last-child {
   color: var(--sub);
@@ -1480,14 +1484,14 @@ td a {
 }
 /* Check list: what must be fixed in red, what is worth a look in amber. */
 .lists tr.warn td:first-child {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 700;
 }
 .lists tr.note td:first-child {
-  color: #b45309;
+  color: #92400e;
 }
 .tabs button.alert:not(.on) {
-  color: #dc2626;
+  color: var(--danger);
   border-color: #fca5a5;
 }
 /* Equipment list rows are put in order by a grip at their start (and their number). */
@@ -1761,17 +1765,17 @@ body.row-dragging .lists td.editable:hover {
   background: transparent;
   border-style: dashed dashed none;
   box-shadow: none;
-  color: var(--sub);
   font-size: 15px;
 }
 .board-tabs .board-tab.add:hover {
   background: #fff;
   color: var(--accent);
 }
+/* Not --sub: on the strip's grey it is 4.2:1. The tabs' own text colour beside it. */
 .board-tabs-hint {
   align-self: center;
   margin-left: 8px;
-  color: var(--sub);
+  color: #475569;
   font-size: 11.5px;
   white-space: nowrap;
 }
@@ -1850,10 +1854,6 @@ body.row-dragging .lists td.editable:hover {
 .kind-card.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
-}
-/* --sub on the chosen card's tint is 4.37:1, short of the 4.5:1 small text needs. */
-.kind-card.on small {
-  color: #475569;
 }
 /* Chosen shown by a mark as well as the colour; aria-pressed says it to a screen reader. */
 .kind-card.on::after {
@@ -2096,8 +2096,9 @@ body.row-dragging .lists td.editable:hover {
   flex-shrink: 0;
   align-self: center;
 }
+/* Not green-600 (#16a34a): 3.1:1 on the panel's tint. */
 .settled {
-  color: #16a34a;
+  color: #15803d;
   font-weight: 700;
   margin-right: auto;
 }
@@ -2186,7 +2187,8 @@ body.row-dragging .lists td.editable:hover {
   padding: 0 4px;
   border-radius: 8px;
   background: #f59e0b;
-  color: #fff;
+  /* Not white: 2.2:1 on the amber. */
+  color: var(--ink);
   font-size: 10.5px;
   line-height: 16px;
   text-align: center;
@@ -2665,9 +2667,10 @@ button.project-item {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Not inherited: the blue and the grey text around it are 3.8–4.2:1 on the yellow. */
 .search-hit mark {
   background: #fde68a;
-  color: inherit;
+  color: var(--ink);
   border-radius: 2px;
   padding: 0 1px;
 }
