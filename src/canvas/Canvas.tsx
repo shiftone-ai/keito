@@ -9,7 +9,7 @@ import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
 import { NOT_TAKEN } from '../collab/scope';
-import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore, useTakes } from '../model/store';
+import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
 import { isImageFile, readImageFile } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
@@ -238,7 +238,6 @@ function neededHeight(n: Node, text: string): number | null {
 
 export function Canvas() {
   const viewing = useStore((s) => !!s.viewing);
-  const takes = useTakes();
   const svgRef = useRef<SVGSVGElement>(null);
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
@@ -877,11 +876,10 @@ export function Canvas() {
   const hs = 8 / view.k;
   // Hidden rather than refused when used: an old state from the history is only looked at.
   const idle = tool === 'select' && !editing && !busy && !viewing;
-  const wiring = idle && takes('lines');
   const cursor = space || tool === 'pan' ? 'grab' : tool === 'select' && !placing ? 'default' : 'crosshair';
   // What waits to be placed, outlined under the pointer: a library item, or the box an armed tool makes.
   const waiting = placing ? { label: placing.label, size: placing.size } : placesBox(tool) && boxSize(tool) && !busy ? { label: '', size: boxSize(tool)! } : null;
-  const preview = wiring && handleNode && canConnect(handleNode) && hoverSide ? spawnRect(doc, handleNode, hoverSide) : null;
+  const preview = idle && handleNode && canConnect(handleNode) && hoverSide ? spawnRect(doc, handleNode, hoverSide) : null;
 
   // While searching, what was not found fades (areas less, so the found keep their setting).
   const faded = (id: string, frame = false): number | undefined => (found && !found.has(id) ? (frame ? 0.5 : 0.22) : undefined);
@@ -1000,7 +998,7 @@ export function Canvas() {
             })()}
 
           {handleNode &&
-            wiring &&
+            idle &&
             SIDES.map((side) => {
               const at = sidePoint(nodeRect(handleNode), side);
               // A junction dot is smaller than its handles: stand them off so they don't pile up on it.
@@ -1025,7 +1023,7 @@ export function Canvas() {
               );
             })}
 
-          {wiring &&
+          {idle &&
             devicePorts((key, p, end, side) => {
               // Never smaller on screen than a fingertip of a pointer, however far out the view is
               // zoomed; set a little outside the box, so its edge still takes the box itself; and
@@ -1034,7 +1032,7 @@ export function Canvas() {
               const r = Math.max(9, 7 / view.k);
               return <circle key={key} className="port-hit" cx={p.x + out * r * 0.35} cy={p.y} r={r} onPointerDown={(e) => takePort(e, end, p)} />;
             })}
-          {wiring && selectedEdge && !isTagged(doc, selectedEdge) && (
+          {idle && selectedEdge && !isTagged(doc, selectedEdge) && (
             <EdgeHandles pts={routes.get(selectedEdge.id) ?? []} k={view.k} manual={!!selectedEdge.route} onSegment={(ev, seg, h, route) => onSegmentDown(ev, selectedEdge.id, seg, h, route)} onEnd={(ev, end, other) => onEndDown(ev, selectedEdge.id, end, other)} />
           )}
           {/* While a cable is being dragged, the port under the cursor lights up as the drop target. */}

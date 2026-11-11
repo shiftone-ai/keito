@@ -46,9 +46,8 @@ export const noEdit = (): BoardEdit => ({ ...noItems<Placed>(), ports: new Map()
 
 export const isNoEdit = (e: BoardEdit): boolean => isNoItems(e) && !e.ports.size && isNoItems(e.lines);
 
-const IDENTITY = new Set(['id', 'type']);
 /** A device's ports are read apart (see portsBetween). */
-const NODE_APART = new Set([...IDENTITY, 'ports']);
+const NODE_APART = new Set(['id', 'type', 'ports']);
 // A legend is as tall as its rows: each screen works it out, and no one edits it.
 const LEGEND_APART = new Set([...NODE_APART, 'h']);
 const ID = new Set(['id']);

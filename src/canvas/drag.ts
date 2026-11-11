@@ -71,10 +71,21 @@ export function endDrag(d: Drag | null): void {
  * a move carries may go without ending it.
  */
 export function lostTarget(doc: Doc, d: Drag): boolean {
-  const node = d.kind === 'move' ? d.lead : d.kind === 'resize' ? d.id : d.kind === 'connect' ? d.from.node : null;
-  if (node !== null && !doc.nodes.some((n) => n.id === node)) return true;
-  if (d.kind === 'connect') return !!d.from.port && !portOf(doc, d.from);
-  return (d.kind === 'reconnect' || d.kind === 'segment' || d.kind === 'label') && !doc.edges.some((e) => e.id === d.id);
+  const gone = (id: string) => !doc.nodes.some((n) => n.id === id);
+  switch (d.kind) {
+    case 'move':
+      return gone(d.lead);
+    case 'resize':
+      return gone(d.id);
+    case 'connect':
+      return gone(d.from.node) || (!!d.from.port && !portOf(doc, d.from));
+    case 'reconnect':
+    case 'segment':
+    case 'label':
+      return !doc.edges.some((e) => e.id === d.id);
+    default:
+      return false;
+  }
 }
 
 export const portOf = (doc: Doc, end: EdgeEnd) => {

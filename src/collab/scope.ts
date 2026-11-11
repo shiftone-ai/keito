@@ -56,10 +56,10 @@ export const LINE_TEXTS = ['label', 'note'] as const;
 /**
  * An edit a board can be asked for besides changing its nodes: picking a tool, typing text in,
  * making copies (duplicating, pasting), the order things are drawn or listed in (nodes, a device's
- * ports), lines, ports, the board's settings, pictures, a device being one with devices on other
+ * ports), the board's settings, pictures, a device being one with devices on other
  * boards (or software running on one), tidying the board up, comments, and taking the board off.
  */
-export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'lines' | 'ports' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
+export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. A text box is nothing until text is typed into it. */
 const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'copying', 'restack', 'settings', 'images', 'links', 'tidy', 'comments', 'removing']);

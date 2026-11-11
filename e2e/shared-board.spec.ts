@@ -35,20 +35,30 @@ const placeOf = async (page: Page) => ({ x: Number(await shape(page).getAttribut
 const box = (page: Page) => page.locator('#canvas rect[width="140"][height="60"]:not([fill="none"])');
 /** The colour picked in the inspector for what is selected. */
 const colour = (page: Page) => page.locator('.inspector .swatches button.on');
+type Pt = { x: number; y: number };
+/** The middle of what a locator finds, on the page. */
+async function middleOf(what: Locator): Promise<Pt> {
+  const at = (await what.boundingBox())!;
+  return { x: at.x + at.width / 2, y: at.y + at.height / 2 };
+}
 /** Click the middle of what a locator finds, as a person would: the text drawn on the board takes no clicks of its own. */
 async function clickOn(page: Page, what: Locator): Promise<void> {
-  const at = (await what.boundingBox())!;
-  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  const at = await middleOf(what);
+  await page.mouse.click(at.x, at.y);
 }
-/** Drag the shape by its middle by (dx, dy), in steps; `between` runs halfway, the button still held. */
-async function dragShape(page: Page, dx: number, dy: number, between: () => Promise<void> = async () => {}): Promise<void> {
-  const at = (await shape(page).boundingBox())!;
-  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+/** Press at `from` and let go at `to`, moving in steps; `between` runs halfway, the button still held. */
+async function drag(page: Page, from: Pt, to: Pt, between: () => Promise<void> = async () => {}): Promise<void> {
+  await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(at.x + at.width / 2 + dx / 2, at.y + at.height / 2 + dy / 2, { steps: 5 });
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
   await between();
-  await page.mouse.move(at.x + at.width / 2 + dx, at.y + at.height / 2 + dy, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
   await page.mouse.up();
+}
+/** Drag the shape by its middle by (dx, dy) (see drag). */
+async function dragShape(page: Page, dx: number, dy: number, between?: () => Promise<void>): Promise<void> {
+  const at = await middleOf(shape(page));
+  await drag(page, at, { x: at.x + dx, y: at.y + dy }, between);
 }
 
 test('two browsers share a moved shape, and it is there after the server is killed', async ({ browser }) => {
@@ -234,17 +244,9 @@ async function cables(page: Page, count: number): Promise<string[]> {
   await panel.click();
   return rows;
 }
-/** Pull a line from the target of a port to the middle of `onto`, in steps; `between` runs halfway, the button still held. */
-async function pullLine(page: Page, port: Locator, onto: Locator, between: () => Promise<void> = async () => {}): Promise<void> {
-  const from = (await port.boundingBox())!;
-  const to = (await onto.boundingBox())!;
-  const end = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move((from.x + end.x) / 2, (from.y + end.y) / 2, { steps: 6 });
-  await between();
-  await page.mouse.move(end.x, end.y, { steps: 6 });
-  await page.mouse.up();
+/** Pull a line from the target of a port to the middle of `onto` (see drag). */
+async function pullLine(page: Page, port: Locator, onto: Locator, between?: () => Promise<void>): Promise<void> {
+  await drag(page, await middleOf(port), await middleOf(onto), between);
 }
 
 test('two browsers show the same lines and cable list, and a line pulled from a device the other takes off is not made', async ({ browser }) => {

@@ -57,12 +57,11 @@ function endOf(v: unknown): EdgeEnd | null {
   return end;
 }
 
-const endsOf = (from: unknown, to: unknown) => ({ from: endOf(from), to: endOf(to) });
-
 /** A line as the drawing reads it; null for one not whole. */
 function lineOf(id: string, line: YMap): Edge | null {
   const ends = line.get('ends') as Record<string, unknown> | undefined;
-  const { from, to } = endsOf(ends?.from, ends?.to);
+  const from = endOf(ends?.from);
+  const to = endOf(ends?.to);
   if (!from || !to) return null;
   const out: Record<string, unknown> = { id, from, to, label: textOf(line.get('label')), note: textOf(line.get('note')) };
   for (const key of LINE_ATTRIBUTES) {
@@ -80,7 +79,7 @@ function putLine(lines: YMap, e: Edge, order: number): void {
   lines.set(e.id, line);
   line.set('id', e.id);
   line.set('order', order);
-  line.set('ends', endsOf(e.from, e.to));
+  line.set('ends', { from: e.from, to: e.to });
   line.set('label', new Y.Text(e.label));
   line.set('note', new Y.Text(e.note));
   for (const key of LINE_ATTRIBUTES) if (e[key] !== undefined) line.set(key, e[key]);
@@ -90,7 +89,7 @@ const ENDS = new Set(['from', 'to']);
 
 /** Change attributes of a line in place, each on its own; its ends, both at once. */
 function changeLine(line: YMap, change: Change): void {
-  if ('from' in change) line.set('ends', endsOf(change.from, change.to));
+  if ('from' in change) line.set('ends', { from: change.from, to: change.to });
   setEach(line, change, ENDS);
 }
 

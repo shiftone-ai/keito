@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSeed } from '../src/collab/model';
-import { nodeRect } from '../src/model/geometry';
+import { center, nodeRect } from '../src/model/geometry';
 import { allIds, freshId } from '../src/model/ids';
 import { cableTable } from '../src/model/lists';
 import { JUNCTION, makeDevice, makeLegend, makeNode, presetOf } from '../src/model/presets';
@@ -260,10 +260,7 @@ type Editor = Awaited<ReturnType<typeof editor>>;
 let plans: typeof import('../src/canvas/connect');
 
 /** The middle of a node as the editor sees it: a line let go there lands on the node's body. */
-function middle(x: Editor, id: string): Pt {
-  const r = nodeRect(x.node(id)!);
-  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
-}
+const middle = (x: Editor, id: string): Pt => center(nodeRect(x.node(id)!));
 
 /** Pull a line from `from` and let go on the body of `onto`, as the canvas does. Returns the line's id. */
 function connect(x: Editor, from: EdgeEnd, onto: string): string {

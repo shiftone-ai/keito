@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { safeUrl } from '../../model/url';
 import { colourKey, ipIssues, quantityOf, unitsOf } from '../../model/lists';
 import { freshId, portIds } from '../../model/ids';
@@ -189,7 +189,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
         </label>
       </Section>
       {(['left', 'right'] as const).map((side) => (
-        <fieldset key={side} className="plain" disabled={!takes('ports')}>
+        <Fragment key={side}>
           <Section
             title={side === 'left' ? '入力ポート（左）' : '出力ポート（右）'}
             note={`${ports(side).length} 個`}
@@ -217,7 +217,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
             ))}
             {!ports(side).length && <p className="hint">ポートはありません。</p>}
           </Section>
-        </fieldset>
+        </Fragment>
       ))}
       {!soft && <SignalHowTo port />}
       {takes('links') && <SharedSection n={n} />}

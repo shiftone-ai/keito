@@ -43,6 +43,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   let base: Doc | null = null;
   /** The edit of the operation under way: shown here, written to the project when it ends. */
   let draft: BoardEdit = noEdit();
+  let unshare = (): void => {};
   const stop = project.listen(refresh);
 
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
@@ -59,7 +60,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
    * whose ends others took off meanwhile), and each legend as tall as its rows.
    */
   function view(): Doc {
-    return shareIds(fitLegends(validDrawing(withEdit(base!, draft))));
+    return fitLegends(validDrawing(withEdit(base!, draft)));
   }
 
   /**
@@ -150,6 +151,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         host.commitOperation();
         board = next;
         base = doc;
+        unshare();
+        unshare = shareIds(next);
         host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
         host.opened();
         return true;
@@ -164,6 +167,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     local: null,
     refusal: NOT_TAKEN,
     close() {
+      unshare();
       stop();
       project.close();
     },

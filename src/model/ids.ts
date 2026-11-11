@@ -8,10 +8,10 @@ import type { DeviceNode, Doc } from './types';
  */
 const sharedBoards = new Set<string>();
 
-/** Have ids made for this board (see allIds and portIds) unique wherever they are made. */
-export function shareIds(doc: Doc): Doc {
-  sharedBoards.add(doc.id);
-  return doc;
+/** Have ids made for this board (see allIds and portIds) unique wherever they are made, until the function returned is called. */
+export function shareIds(board: string): () => void {
+  sharedBoards.add(board);
+  return () => sharedBoards.delete(board);
 }
 
 /** The ids taken on a shared board: an id made from them is unique by chance, not by what is here. */
