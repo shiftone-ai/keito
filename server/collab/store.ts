@@ -9,6 +9,7 @@ const digest = (token: string): string => createHash('sha256').update(token).dig
  * The collaboration server's SQLite file. A project's Yjs state is the binary as last compacted plus
  * the edits stored since, each under the op id it was committed with. A project exists only once it
  * has been initialized (`initProject`): an empty or unknown document is never taken for a new one.
+ * A deleted project keeps its row and its state, marked `deleted_at`, until it is restored.
  * Grants keep only the hash of their secret.
  */
 export function openStore(file: string) {
@@ -22,7 +23,8 @@ export function openStore(file: string) {
       id TEXT PRIMARY KEY,
       schema INTEGER NOT NULL,
       initialized_at TEXT NOT NULL,
-      state BLOB NOT NULL
+      state BLOB NOT NULL,
+      deleted_at TEXT
     );
     CREATE TABLE IF NOT EXISTS updates (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +45,9 @@ export function openStore(file: string) {
     );
   `);
 
+  // CREATE TABLE IF NOT EXISTS leaves a table made before projects could be deleted without the column.
+  if (!db.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get('projects', 'deleted_at')) db.exec('ALTER TABLE projects ADD COLUMN deleted_at TEXT');
+
   function inTransaction<T>(fn: () => T): T {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -56,11 +61,16 @@ export function openStore(file: string) {
   }
 
   const now = (): string => new Date().toISOString();
+  /** Whether the project is deleted (false for a project never initialized). */
+  const isDeleted = (id: string): boolean => !!sql.deletedAt.get(id)?.deleted_at;
   const sql = {
     addProject: db.prepare('INSERT INTO projects (id, schema, initialized_at, state) VALUES (?, ?, ?, ?)'),
     addGrant: db.prepare('INSERT INTO grants (id, project, token_hash, created_at) VALUES (?, ?, ?, ?)'),
     grant: db.prepare('SELECT project FROM grants WHERE token_hash = ?'),
     schema: db.prepare('SELECT schema FROM projects WHERE id = ?'),
+    deletedAt: db.prepare('SELECT deleted_at FROM projects WHERE id = ?'),
+    markDeleted: db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'),
+    unmarkDeleted: db.prepare('UPDATE projects SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL'),
     state: db.prepare('SELECT state FROM projects WHERE id = ?'),
     edits: db.prepare('SELECT data FROM updates WHERE project = ? ORDER BY seq'),
     known: db.prepare('SELECT 1 FROM ops WHERE project = ? AND op = ?'),
@@ -105,6 +115,21 @@ export function openStore(file: string) {
       return row ? Number(row.schema) : null;
     },
 
+    isDeleted,
+
+    /**
+     * Delete a project: clients are turned away from it, and its edits are no longer stored, until it
+     * is restored. False when there is no such project not yet deleted.
+     */
+    deleteProject(id: string): boolean {
+      return sql.markDeleted.run(now(), id).changes > 0;
+    },
+
+    /** Bring a deleted project back as it was when deleted. False when there is no such deleted project. */
+    restoreProject(id: string): boolean {
+      return sql.unmarkDeleted.run(id).changes > 0;
+    },
+
     /** The project's Yjs state as stored, or null for a project never initialized. */
     load(id: string): Uint8Array | null {
       const row = sql.state.get(id);
@@ -113,9 +138,10 @@ export function openStore(file: string) {
       return Y.mergeUpdates([row.state as Uint8Array, ...edits]);
     },
 
-    /** Store a committed edit once: 'known' when this op id was stored before. */
-    commit(project: string, op: string, update: Uint8Array): 'stored' | 'known' {
+    /** Store a committed edit once: 'known' when this op id was stored before, 'deleted' (not stored) for a deleted project. */
+    commit(project: string, op: string, update: Uint8Array): 'stored' | 'known' | 'deleted' {
       return inTransaction(() => {
+        if (isDeleted(project)) return 'deleted';
         if (sql.known.get(project, op)) return 'known';
         sql.addEdit.run(project, update);
         sql.addOp.run(project, op, now());
