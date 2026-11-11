@@ -60,7 +60,7 @@ async function open(page: Page): Promise<void> {
   await expect(page.locator('.save-state')).toHaveText('フォルダに保存済み', { timeout: 30_000 });
 }
 
-test('the board settings, the tab strip, the board list, the search and the list tabs keep their text at WCAG contrast', async ({ page }) => {
+test('the board settings, the tab strip, the board list, the search, a field error and the list tabs keep their text at WCAG contrast', async ({ page }) => {
   await open(page);
   expect.soft(await faintText(page.locator('aside.inspector'))).toEqual([]);
   expect.soft(await faintText(page.locator('nav.board-tabs'))).toEqual([]);
@@ -74,7 +74,12 @@ test('the board settings, the tab strip, the board list, the search and the list
   await page.locator('.search-bar input').fill('HDMI');
   await expect(page.locator('.search-hit.on')).toBeVisible();
   expect.soft(await faintText(page.locator('.search-bar'))).toEqual([]);
-  await page.keyboard.press('Escape');
+
+  await page.locator('.search-bar input').fill('映像再生PC');
+  await page.keyboard.press('Enter');
+  await page.getByLabel('型番のリンク（製品ページなど）').fill('not a link');
+  await expect(page.locator('aside.inspector .error')).toBeVisible();
+  expect.soft(await faintText(page.locator('aside.inspector'))).toEqual([]);
 
   await page.getByRole('button', { name: '機材・ケーブル表' }).click();
   await expect(page.locator('.lists .tabs button.on')).toBeVisible();

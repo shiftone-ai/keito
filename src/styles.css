@@ -7,7 +7,8 @@
   --sub: #5b6b81;
   --accent: #2563eb;
   --accent-soft: #eff6ff;
-  --danger: #dc2626;
+  /* Not red-600 (#dc2626): 4.2–4.4:1 on the error box, a hovered or chosen row and a hovered tab. */
+  --danger: #b91c1c;
   font-family: -apple-system, 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
   font-size: 13px;
   color: var(--ink);
@@ -1016,18 +1017,19 @@ td.empty {
 .workbook tr.subtotal.over td {
   background: #fdecec;
 }
+/* Not green-700 (#15803d): 4.46:1 on the sums' grey. */
 .workbook tr.subtotal td:last-child {
-  color: #15803d;
+  color: #166534;
 }
 .workbook tr.subtotal.over td:last-child {
-  color: #b91c1c;
+  color: var(--danger);
 }
 .workbook tr.subtotal.unknown td:last-child {
   color: var(--sub);
   font-weight: 400;
 }
 .workbook tr.warn td:first-child {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 700;
 }
 .workbook tr.note td:first-child {
@@ -1327,7 +1329,7 @@ td a {
   color: #15803d;
 }
 .changes li.del b {
-  color: #dc2626;
+  color: var(--danger);
 }
 .changes li.mod b {
   color: #b45309;
@@ -1466,14 +1468,15 @@ td a {
   font-weight: 700;
   border-bottom: 2px solid #cbd5e1;
 }
+/* Not green-700 (#15803d), nor amber-700 below: 4.4:1 on a hovered row. */
 .lists tr.subtotal td:last-child {
-  color: #15803d;
+  color: #166534;
 }
 .lists tr.subtotal.over td {
   background: #fef2f2;
 }
 .lists tr.subtotal.over td:last-child {
-  color: #dc2626;
+  color: var(--danger);
 }
 .lists tr.subtotal.unknown td:last-child {
   color: var(--sub);
@@ -1481,14 +1484,14 @@ td a {
 }
 /* Check list: what must be fixed in red, what is worth a look in amber. */
 .lists tr.warn td:first-child {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 700;
 }
 .lists tr.note td:first-child {
-  color: #b45309;
+  color: #92400e;
 }
 .tabs button.alert:not(.on) {
-  color: #dc2626;
+  color: var(--danger);
   border-color: #fca5a5;
 }
 /* Equipment list rows are put in order by a grip at their start (and their number). */
