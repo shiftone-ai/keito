@@ -98,7 +98,8 @@ export function TopBar() {
         disabled={!takes('removing')}
         data-tip="このボードを削除（ボード一覧から戻せます。図形の削除は Delete）"
         onClick={() => {
-          void ask(`「${doc.meta.title}」を削除しますか？\n（ボード一覧の「最近削除したボード」から戻せます）`).then((yes) => yes && st().deleteBoard(doc.id));
+          const where = collab ? '共有案件から削除しますか？\n参加している全員の画面から消えます（ボード一覧から戻せます）' : '削除しますか？\n（ボード一覧の「最近削除したボード」から戻せます）';
+          void ask(`「${doc.meta.title}」を${where}`).then((yes) => yes && st().deleteBoard(doc.id));
         }}
       >
         {ICON.trash}

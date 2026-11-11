@@ -10,9 +10,12 @@ export function Inspector() {
   const selection = useStore((s) => s.selection);
   const viewing = useStore((s) => !!s.viewing);
   const collab = useStore((s) => !!s.collab);
+  // A shared project with no board has nothing to set: what is on screen is no board.
+  const noBoard = useStore((s) => !!s.collab && !s.collab.boards.length);
   const takes = useTakes();
   const remove = () => useStore.getState().removeIds(selection);
   const lines = doc.edges.filter((e) => selection.includes(e.id)).length;
+  if (noBoard) return <aside className="inspector" />;
   let body;
   if (selection.length === 0) body = <MetaPanel />;
   else if (selection.length === 1) {

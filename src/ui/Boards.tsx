@@ -3,6 +3,7 @@ import { type BoardKind, KINDS, KIND_ORDER } from '../model/kinds';
 import { deletedBoards, restoreBoard, startBoard, useStore } from '../model/store';
 import type { BoardInfo, TrashedBoard } from '../platform/storage';
 import { composing } from './keys';
+import { SharedProjectBoards } from './SharedBoards';
 
 /** The boards window opens on the list, or straight on the form for a new board. */
 let startWithForm = false;
@@ -69,30 +70,41 @@ function Trash({ done }: { done: () => void }) {
 /**
  * Projects and their boards. Boards are grouped by their project (案件名); each says what kind it
  * is. A new board is made here by choosing its kind, and a project can be renamed for all its
- * boards at once.
+ * boards at once. A shared project on screen is listed first, apart from this machine's projects
+ * (see SharedProjectBoards), whatever they are named.
  */
 export function BoardsPanel() {
   const st = useStore.getState;
   const doc = useStore((s) => s.doc);
   const boards = useStore((s) => s.boards);
-  // The board on screen as it is now (its title or project may have just been edited).
+  const collab = useStore((s) => s.collab);
+  // The board on screen as it is now (its title or project may have just been edited), when it is one of this machine's.
   const all: BoardInfo[] = useMemo(() => {
+    if (collab) return boards;
     const here: BoardInfo = { id: doc.id, title: doc.meta.title, updated: Date.now(), project: doc.meta.project || undefined, kind: doc.kind };
     return [here, ...boards.filter((b) => b.id !== doc.id)];
-  }, [boards, doc.id, doc.meta.title, doc.meta.project, doc.kind]);
+  }, [boards, collab, doc.id, doc.meta.title, doc.meta.project, doc.kind]);
+  // The project of the board on screen, when it is one of this machine's.
+  const mine = collab ? null : (doc.meta.project ?? NO_PROJECT);
   const projects = useMemo(() => {
     const latest = new Map<string, number>();
     for (const b of all) latest.set(b.project ?? NO_PROJECT, Math.max(latest.get(b.project ?? NO_PROJECT) ?? 0, b.updated));
     // The open board's project first, then the most recently worked on.
-    const mine = doc.meta.project ?? NO_PROJECT;
     return [...latest.keys()].sort((a, b) => (a === mine ? -1 : b === mine ? 1 : (latest.get(b) ?? 0) - (latest.get(a) ?? 0)));
-  }, [all, doc.meta.project]);
-  const [project, setProject] = useState(doc.meta.project ?? NO_PROJECT);
+  }, [all, mine]);
+  const [project, setProject] = useState(mine ?? projects[0] ?? NO_PROJECT);
+  const [shared, setShared] = useState(!!collab);
   const [form, setForm] = useState<{ kind: BoardKind; title: string; project: string } | null>(() =>
-    startWithForm ? { kind: 'system', title: '', project: doc.meta.project ?? NO_PROJECT } : null,
+    startWithForm && !collab ? { kind: 'system', title: '', project: doc.meta.project ?? NO_PROJECT } : null,
   );
   const [renaming, setRenaming] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
+  // The deleted boards of a shared project are listed with it: this list is only this machine's.
+  const trashLabel = collab ? 'この端末で削除したボード' : '最近削除したボード';
+  const pick = (p: { shared: boolean; trash: boolean }) => {
+    setShared(p.shared);
+    setTrash(p.trash);
+  };
   const shown = all.filter((b) => (b.project ?? NO_PROJECT) === project).sort((a, b) => b.updated - a.updated);
   const close = () => st().setPanel(null);
 
@@ -106,40 +118,54 @@ export function BoardsPanel() {
         <div className="modal-body cols">
           <div className="col side projects">
             <h4>案件</h4>
+            {collab && (
+              <button className={`project${shared && !trash ? ' on' : ''}`} onClick={() => pick({ shared: true, trash: false })}>
+                <span>{doc.meta.project}（共有中）</span>
+                <small>{collab.boards.length}</small>
+              </button>
+            )}
             {projects.map((p) => (
               <button
                 key={p || '-'}
-                className={`project${p === project && !trash ? ' on' : ''}`}
+                className={`project${p === project && !trash && !shared ? ' on' : ''}`}
                 onClick={() => {
                   setProject(p);
-                  setTrash(false);
+                  pick({ shared: false, trash: false });
                 }}
               >
                 <span>{projectLabel(p)}</span>
                 <small>{all.filter((b) => (b.project ?? NO_PROJECT) === p).length}</small>
               </button>
             ))}
-            {!projects.includes(project) && (
+            {!projects.includes(project) && !shared && (
               <button className="project on">
                 <span>{projectLabel(project)}</span>
                 <small>0</small>
               </button>
             )}
             {/* A project comes into being with its first board: the form asks for both. */}
-            <button className="mini new-project" onClick={() => setForm({ kind: 'system', title: '', project: '' })}>
+            <button
+              className="mini new-project"
+              onClick={() => {
+                setForm({ kind: 'system', title: '', project: '' });
+                pick({ shared: false, trash: false });
+              }}
+            >
               ＋ 新しい案件
             </button>
-            <button className={`project trash-link${trash ? ' on' : ''}`} onClick={() => setTrash(true)}>
-              <span>最近削除したボード</span>
+            <button className={`project trash-link${trash ? ' on' : ''}`} onClick={() => pick({ shared: false, trash: true })}>
+              <span>{trashLabel}</span>
             </button>
           </div>
           {trash ? (
             <div className="col">
               <div className="project-head">
-                <h3>最近削除したボード</h3>
+                <h3>{trashLabel}</h3>
               </div>
               <Trash done={close} />
             </div>
+          ) : shared && collab ? (
+            <SharedProjectBoards collab={collab} withForm={startWithForm} close={close} />
           ) : (
           <div className="col">
             <div className="project-head">
@@ -187,7 +213,7 @@ export function BoardsPanel() {
               <div className="new-board">
                 <div className="kinds">
                   {KIND_ORDER.map((k) => (
-                    <button key={k} className={`kind-card${form.kind === k ? ' on' : ''}`} onClick={() => setForm({ ...form, kind: k })}>
+                    <button key={k} className={`kind-card${form.kind === k ? ' on' : ''}`} aria-pressed={form.kind === k} onClick={() => setForm({ ...form, kind: k })}>
                       <b className={`kind-badge ${k}`}>{KINDS[k].label}</b>
                       <small>{KINDS[k].hint}</small>
                     </button>

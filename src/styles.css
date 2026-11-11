@@ -2232,6 +2232,58 @@ body.row-dragging .lists td.editable:hover {
   border-radius: 0;
   color: var(--sub);
 }
+/* A board of a shared project: opened from its face, renamed from its foot */
+.board-card.shared {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.board-card.shared:hover {
+  background: #f1f5f9;
+}
+.board-card.shared.on {
+  border-color: var(--accent);
+}
+.board-card.shared .open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.board-card.shared .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.board-card.shared input {
+  width: 100%;
+}
+.deleted-head {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  color: var(--sub);
+}
+/* A shared project with no board: a board to add, or a deleted one to bring back, in the middle of the canvas */
+.empty-project {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.empty-project .board-cards {
+  width: 100%;
+}
 .board-card.trashed {
   border: 1px dashed var(--line);
   border-radius: 6px;
