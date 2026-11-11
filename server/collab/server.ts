@@ -44,12 +44,14 @@ export function collabServer(store: CollabStore, options: { port: number; addres
       const commit = readCommit(payload);
       if (!commit) return;
       const answer = (a: Answer): void => connection.sendStateless(writeAnswer(a));
+      const probe = new Y.Doc();
       try {
-        // Applied before it is stored: a malformed update throws here and is never stored, and the
-        // document holds every stored edit when it is compacted (see store.compact).
-        Y.applyUpdate(document, commit.update, { source: 'local' });
+        // Read on a document of its own, not the project's: the project's takes only what is stored.
+        Y.applyUpdate(probe, commit.update);
       } catch {
         return answer({ type: 'refused', op: commit.op, reason: 'malformed' });
+      } finally {
+        probe.destroy();
       }
       try {
         store.commit(documentName, commit.op, commit.update);
@@ -58,6 +60,9 @@ export function collabServer(store: CollabStore, options: { port: number; addres
         console.error(`[keito-collab] ${documentName}: edit ${commit.op} not stored: ${reason}`);
         return answer({ type: 'failed', op: commit.op, reason });
       }
+      // Not applied before it is stored: another editor would see it, and an edit made over it
+      // would be stored without it, which the project could not take in after a restart.
+      Y.applyUpdate(document, commit.update, { source: 'local' });
       answer({ type: 'saved', op: commit.op });
     },
 

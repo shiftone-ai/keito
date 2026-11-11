@@ -126,7 +126,7 @@ export function openStore(file: string) {
     /**
      * Replace the stored edits with the whole state they were applied to. `state` must hold every
      * edit stored so far: it is taken from the server's document, to which each edit is applied
-     * before it is stored.
+     * right after it is stored, with nothing run in between.
      */
     compact(project: string, state: Uint8Array): void {
       inTransaction(() => {

@@ -140,16 +140,12 @@ describe('a shared project', () => {
 
   it('keeps a move whose store failed, says so, and stores it on retry', async () => {
     const a = await editor();
-    const b = await editor();
     const lock = new DatabaseSync(join(data, 'keito-collab.sqlite'));
     lock.exec('BEGIN EXCLUSIVE');
     try {
       a.drag(300, 40);
       await until(() => a.s().saving === 'error', 5_000, 'the failed store to be shown');
       expect(a.s().collab?.pending).toBe(1);
-      // The other editor has the move from the server's memory: that is no store.
-      await until(() => b.shape()?.x === 300, 5_000, 'the move to reach the other editor');
-      expect(a.s().saving).toBe('error');
     } finally {
       lock.exec('COMMIT');
       lock.close();
@@ -161,6 +157,30 @@ describe('a shared project', () => {
 
     const c = await afterRestart();
     expect(at(c.shape())).toEqual({ x: 300, y: 40 });
+  });
+
+  it('keeps a move stored over the move of another editor that failed to store, through a killed server', async () => {
+    const a = await editor();
+    const b = await editor();
+    const lock = new DatabaseSync(join(data, 'keito-collab.sqlite'));
+    lock.exec('BEGIN EXCLUSIVE');
+    try {
+      a.drag(300, 40);
+      await until(() => a.s().saving === 'error', 5_000, 'the failed store to be shown');
+      // Gone before it sends the move again: the move is never stored.
+      a.session.dispose();
+      // Nothing comes to wait for: what is checked is that the move never arrives.
+      await new Promise((r) => setTimeout(r, 300));
+      expect(at(b.shape())).toEqual({ x: 0, y: 0 });
+    } finally {
+      lock.exec('COMMIT');
+      lock.close();
+    }
+    b.drag(80, 80);
+    await until(() => b.s().saving === 'saved', 5_000, 'the move to be confirmed');
+
+    const c = await afterRestart();
+    expect(at(c.shape())).toEqual({ x: 80, y: 80 });
   });
 
   it('turns away edits a shared board does not take yet, and never writes it to the local store', async () => {
