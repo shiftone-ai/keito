@@ -1084,12 +1084,26 @@ td.empty {
 }
 .save-state {
   font-size: 11px;
+  line-height: 1.3;
   color: var(--sub);
   margin-left: 4px;
 }
+.save-state small {
+  display: block;
+  font-size: 10px;
+}
 .save-state.error {
+  /* Not left inline: the button would drop below a two-line state and push the board down. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
   color: var(--danger);
   font-weight: 600;
+}
+.save-state.error small {
+  color: var(--ink);
+  font-weight: 400;
 }
 .save-state.conflict {
   display: inline-flex;
@@ -1107,7 +1121,6 @@ td.empty {
   padding: 2px 8px;
 }
 .save-state.error button {
-  margin-left: 6px;
   font-weight: 400;
 }
 

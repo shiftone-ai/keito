@@ -4,7 +4,9 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { openStore } from '../server/collab/store';
+import type { DeviceStore, KeptProject } from '../src/collab/kept';
 import type { ProjectSeed } from '../src/collab/model';
 import type { Doc } from '../src/model/types';
 
@@ -23,6 +25,8 @@ export function seedData(kind?: Doc['kind']): { data: string; seed: ProjectSeed;
 export interface RunningServer {
   /** Where clients connect: ws://127.0.0.1:<port>. */
   url: string;
+  /** The port it listens on, to start it again where its clients reconnect. */
+  port: number;
   /** Kill the process outright (SIGKILL): nothing it holds in memory is stored on the way out. */
   kill(): Promise<void>;
 }
@@ -43,6 +47,7 @@ export async function startServer(data: string, port = 0): Promise<RunningServer
   const actual = await listening;
   return {
     url: `ws://127.0.0.1:${actual}`,
+    port: actual,
     async kill() {
       if (child.exitCode !== null || child.signalCode !== null) return;
       const exited = once(child, 'exit');
@@ -59,4 +64,97 @@ export async function until(check: () => boolean, ms = 5_000, what = 'condition'
     if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/**
+ * What a device keeps of shared projects, held in memory as a browser holds IndexedDB across reloads:
+ * hand the same one to the editor of a page opened again. While `failing` is set, every write fails with it.
+ */
+export function memoryDevice() {
+  const kept = new Map<string, KeptProject>();
+  const device = { kept, failing: null as Error | null };
+  const store: DeviceStore = {
+    load: async (key) => structuredClone(kept.get(key) ?? null),
+    async change(key, edit) {
+      await Promise.resolve();
+      if (device.failing) throw device.failing;
+      kept.set(key, structuredClone(edit(structuredClone(kept.get(key) ?? null))));
+    },
+  };
+  return Object.assign(device, { store });
+}
+
+export interface Relay {
+  /** Where clients connect instead of the server. */
+  url: string;
+  /** Garbled, each message is held up by up to 40 ms (so some overtake others) and one in four is sent twice. */
+  garble(on: boolean): void;
+  /** Close every connection, and turn new ones away until `reopen`: the clients are offline. */
+  cut(): void;
+  reopen(): void;
+  /** How many messages were sent twice, and how many passed one sent before them on the same connection. */
+  garbled(): { twice: number; overtaking: number };
+  close(): Promise<void>;
+}
+
+/** A relay of whole WebSocket messages between clients and `target`, which can garble or cut what passes; the same `seed`, the same garbling. */
+export async function startRelay(target: string, seed = 1): Promise<Relay> {
+  const relay = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(relay, 'listening');
+  const sockets = new Set<WebSocket>();
+  let garbled = false;
+  let open = true;
+  let state = seed;
+  const random = (): number => (state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+  const counts = { twice: 0, overtaking: 0 };
+
+  relay.on('connection', (client, request) => {
+    if (!open) return client.terminate();
+    const server = new WebSocket(target + (request.url ?? ''));
+    sockets.add(client).add(server);
+    const end = (): void => {
+      for (const socket of [client, server]) {
+        socket.terminate();
+        sockets.delete(socket);
+      }
+    };
+    for (const socket of [client, server]) socket.on('close', end).on('error', end);
+    const reached = new Promise<void>((resolve) => server.once('open', () => resolve()));
+    const pass = (to: WebSocket, ready: Promise<void>) => {
+      let came = 0;
+      let latest = 0;
+      return (data: RawData, binary: boolean) => {
+        const n = ++came;
+        const send = (): void =>
+          void ready.then(() => {
+            if (to.readyState !== WebSocket.OPEN) return;
+            if (n < latest) counts.overtaking++;
+            latest = Math.max(latest, n);
+            to.send(data, { binary });
+          });
+        if (!garbled) return send();
+        const times = random() < 0.25 ? 2 : 1;
+        if (times === 2) counts.twice++;
+        for (let i = 0; i < times; i++) setTimeout(send, Math.floor(random() * 40));
+      };
+    };
+    client.on('message', pass(server, reached));
+    server.on('message', pass(client, Promise.resolve()));
+  });
+
+  const address = relay.address();
+  return {
+    url: `ws://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`,
+    garble: (on) => void (garbled = on),
+    cut() {
+      open = false;
+      for (const socket of sockets) socket.terminate();
+    },
+    reopen: () => void (open = true),
+    garbled: () => ({ ...counts }),
+    async close() {
+      for (const socket of sockets) socket.terminate();
+      await new Promise<void>((resolve) => relay.close(() => resolve()));
+    },
+  };
 }

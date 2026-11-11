@@ -89,6 +89,28 @@ test('two browsers share a moved shape, and it is there after the server is kill
   expect(await placeOf(a)).toEqual(moved);
 });
 
+test('a page reloaded while the server is down opens the project kept in the browser, with its unsent move, and sends the move once the server is back', async ({ browser }) => {
+  const a = await openLink(browser);
+  const { port } = server;
+  await server.kill();
+  await expect(a.locator('.save-state')).toHaveText('オフライン');
+  await dragShape(a, 220, 140);
+  await expect(a.locator('.save-state')).toHaveText(/^オフライン・未送信 1 件/);
+  await expect(a.locator('.save-state small')).toHaveText('本端末に保存済み');
+  const moved = await placeOf(a);
+
+  // No question about the unsent move on reloading (a dialog is dismissed here, and the reload with it).
+  await a.reload();
+  await expect(a.locator('.save-state')).toHaveText(/^オフライン・未送信 1 件/);
+  await expect(a.locator('.save-state small')).toHaveText('本端末に保存済み');
+  expect(await placeOf(a)).toEqual(moved);
+
+  server = await startServer(data, port);
+  await expect(a.locator('.save-state')).toHaveText('共同編集先に保存済み', { timeout: 15_000 });
+  const b = await openLink(browser);
+  expect(await placeOf(b)).toEqual(moved);
+});
+
 test('two browsers see the boxes each puts on a shared board, and the colours and sizes each gives them', async ({ browser }) => {
   const a = await openLink(browser);
   const b = await openLink(browser);

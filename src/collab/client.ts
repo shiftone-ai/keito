@@ -5,6 +5,7 @@ import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
 import type { BoardEdit } from './edits';
+import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
 import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
 
@@ -25,12 +26,16 @@ export type LinkRefusal = Refusal | 'unreachable';
 /**
  * How this client stands with the server. `pending`: edits made here and not yet confirmed stored;
  * `failure`: why the last store failed (they are sent again); `refusal`: why the link is 'refused'.
+ * `device`: whether the project is kept on this device as this page holds it (see kept.ts), and
+ * `deviceFailure`, why not while it is 'failed'.
  */
 export interface ShareStatus {
   link: 'connecting' | 'online' | 'offline' | 'refused';
   pending: number;
   failure: string | null;
   refusal: LinkRefusal | null;
+  device: DeviceState;
+  deviceFailure: string | null;
 }
 
 /** What the user is told when the project cannot be opened (or is left), by the reason it was turned away. */
@@ -57,8 +62,13 @@ export interface Steps {
  * until the server confirms them stored; an edit that fails to store is sent again, under the same
  * op id, until it is. Updates from others change the Y.Doc and are heard through `listen`; they are
  * never sent back as edits of this client, nor undone by it.
+ *
+ * The project is kept on `device` as it changes, its unconfirmed edits included (see kept.ts). A
+ * project kept there, which the server last let this device edit, opens from there before the server
+ * answers, or without it while offline; its unconfirmed edits are sent once the server has let this
+ * client in again. Any other project opens only from the server.
  */
-export function joinProject(join: SharedJoin) {
+export function joinProject(join: SharedJoin, device: DeviceStore | null = null) {
   const ydoc = new Y.Doc();
   /** This page's own edits of the drawing: what its undo takes back. */
   const drawing = Symbol('drawing edit');
@@ -68,8 +78,9 @@ export function joinProject(join: SharedJoin) {
   const histories = new Map<string, Y.UndoManager>();
   const pending = new Map<string, Uint8Array>();
   const listeners = new Set<() => void>();
-  const status: Omit<ShareStatus, 'pending'> = { link: 'connecting', failure: null, refusal: null };
+  const status: Pick<ShareStatus, 'link' | 'failure' | 'refusal'> = { link: 'connecting', failure: null, refusal: null };
   let closed = false;
+  /** Whether the project is on screen: read from the server, or from the copy kept on this device. */
   let joined = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retries = 0;
@@ -83,7 +94,31 @@ export function joinProject(join: SharedJoin) {
   // Nobody may be waiting on it (a connection closed before it synced).
   ready.catch(() => {});
 
-  const provider = new HocuspocusProvider({
+  /** The copy kept on this device; another schema's is a copy of its own, left as it is. */
+  const copy = keepCopy(device, `${join.project}/${SCHEMA}`, () => ({ state: Y.encodeStateAsUpdate(ydoc), pending: new Map(pending) }), notify);
+  /** The copy kept here, as it is put in the Y.Doc: not an edit of this client, nor a change to keep. */
+  const fromDevice = Symbol('kept on this device');
+  let provider: HocuspocusProvider | null = null;
+
+  async function start(): Promise<void> {
+    const kept = await copy.load();
+    if (closed) return;
+    if (kept) {
+      Y.transact(ydoc, () => {
+        Y.applyUpdate(ydoc, kept.state);
+        for (const [op, update] of kept.pending) {
+          pending.set(op, update);
+          Y.applyUpdate(ydoc, update);
+        }
+      }, fromDevice);
+      joined = true;
+      settle.resolve();
+      notify();
+    }
+    provider = connect();
+  }
+
+  const connect = (): HocuspocusProvider => new HocuspocusProvider({
     url: join.server,
     name: join.project,
     document: ydoc,
@@ -92,7 +127,7 @@ export function joinProject(join: SharedJoin) {
       if (closed || status.link === 'refused') return;
       // Not waited out: the provider would try again for ever, and the page waits on `ready` to show a board.
       if (s === WebSocketStatus.Disconnected && !joined) return refuse('unreachable');
-      status.link = s === WebSocketStatus.Connected ? (provider.isSynced ? 'online' : 'connecting') : s === WebSocketStatus.Connecting ? 'connecting' : 'offline';
+      status.link = s === WebSocketStatus.Connected ? (provider?.isSynced ? 'online' : 'connecting') : s === WebSocketStatus.Connecting ? 'connecting' : 'offline';
       notify();
     },
     onSynced: ({ state }) => {
@@ -101,6 +136,7 @@ export function joinProject(join: SharedJoin) {
       joined = true;
       settle.resolve();
       sendAll();
+      copy.changed();
       notify();
     },
     onAuthenticationFailed: ({ reason }) => refuse(reason),
@@ -110,6 +146,7 @@ export function joinProject(join: SharedJoin) {
       if (closed || !answer || !pending.has(answer.op)) return;
       if (answer.type === 'saved') {
         pending.delete(answer.op);
+        copy.confirmed(answer.op);
         if (!pending.size) {
           status.failure = null;
           retries = 0;
@@ -127,7 +164,9 @@ export function joinProject(join: SharedJoin) {
     status.link = 'refused';
     status.refusal = refusalOf(reason);
     settle.reject(new Error(REFUSALS[status.refusal]));
-    provider.destroy();
+    provider?.destroy();
+    // Not before the project is on screen: this page holds nothing of it, and the copy so marked would keep this device from keeping one once let in.
+    if (joined) copy.refused();
     notify();
   }
 
@@ -135,7 +174,7 @@ export function joinProject(join: SharedJoin) {
   const editing = (): boolean => !closed && status.link !== 'refused';
 
   function send(op: string, update: Uint8Array): void {
-    if (!closed && status.link === 'online') provider.sendStateless(writeCommit(op, update));
+    if (!closed && status.link === 'online') provider?.sendStateless(writeCommit(op, update));
   }
 
   /** Send every unconfirmed edit again, oldest first (the server stores each op id once). */
@@ -155,6 +194,7 @@ export function joinProject(join: SharedJoin) {
       pending.set(op, update);
       send(op, update);
     }
+    if (joined && origin !== fromDevice) copy.changed();
     notify();
   });
 
@@ -174,13 +214,16 @@ export function joinProject(join: SharedJoin) {
     return { nodes, lines, history };
   }
 
+  void start();
+
   return {
     /**
-     * Resolves once the project has been read from the server. Rejects, with what to tell the user, when
-     * the server turns the connection away (no grant for the project, another schema) or cannot be reached.
+     * Resolves once the project has been read from the server, or from the copy kept on this device
+     * (see joinProject). Rejects, with what to tell the user, when the server turns the connection away
+     * (no grant for the project, another schema) or cannot be reached before then.
      */
     ready,
-    status: (): ShareStatus => ({ ...status, pending: pending.size }),
+    status: (): ShareStatus => ({ ...status, pending: pending.size, device: copy.state(), deviceFailure: copy.failure() }),
     title: (): string => projectTitle(ydoc),
     boards: (): SharedBoardInfo[] => boardList(ydoc),
     /** The deleted boards, which `restoreBoard` brings back. */
@@ -230,19 +273,24 @@ export function joinProject(join: SharedJoin) {
     renameProject(title: string): void {
       if (editing()) renameProject(ydoc, title, manage);
     },
-    /** Send unconfirmed edits now rather than at the next retry. */
+    /** Send unconfirmed edits now rather than at the next retry, and keep the project on this device again if that failed. */
     retry(): void {
       retries = 0;
       sendAll();
+      copy.changed();
     },
-    /** Disconnect for good. Edits not yet confirmed are let go (see `status().pending`). */
+    /**
+     * Disconnect for good. Edits not yet confirmed stay in the copy kept on this device (see
+     * `status().device`) and are sent the next time the project is opened here; without one they are let go.
+     */
     close(): void {
       if (closed) return;
       closed = true;
       clearTimeout(retryTimer);
       listeners.clear();
+      if (joined) copy.stop();
       histories.forEach((h) => h.destroy());
-      provider.destroy();
+      provider?.destroy();
       ydoc.destroy();
     },
   };
