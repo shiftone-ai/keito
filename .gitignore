@@ -2,3 +2,6 @@ node_modules
 dist
 .DS_Store
 boards
+collab-data
+test-results
+playwright-report

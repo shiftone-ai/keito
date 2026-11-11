@@ -40,8 +40,8 @@ export function tabPlace(e: KeyboardEvent): number | undefined {
  * than a load (a key held down) each go one tab further; otherwise from the board on screen.
  */
 export function nextTab(step: 1 | -1): string | undefined {
-  const { doc, boards } = useStore.getState();
-  return boardBeside(doc, boards, step, boardLoading());
+  const { doc, boards, collab } = useStore.getState();
+  return boardBeside(doc, boards, step, boardLoading(), !!collab);
 }
 
 /**
@@ -54,8 +54,8 @@ function tabFinder(e: KeyboardEvent): (() => string | undefined) | undefined {
   const place = tabPlace(e);
   if (place === undefined) return undefined;
   return () => {
-    const { doc, boards } = useStore.getState();
-    return boardAt(doc, boards, place);
+    const { doc, boards, collab } = useStore.getState();
+    return boardAt(doc, boards, place, !!collab);
   };
 }
 

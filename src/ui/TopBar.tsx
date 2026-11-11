@@ -62,6 +62,7 @@ export function TopBar() {
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const saving = useStore((s) => s.saving);
+  const collab = useStore((s) => s.collab);
   const saveError = useStore((s) => s.saveError);
   const mode = useStore((s) => s.mode);
   const viewing = useStore((s) => !!s.viewing);
@@ -91,6 +92,7 @@ export function TopBar() {
       </button>
       <button
         className="ghost danger-hover"
+        disabled={!!collab}
         data-tip="このボードを削除（ボード一覧から戻せます。図形の削除は Delete）"
         onClick={() => {
           void ask(`「${doc.meta.title}」を削除しますか？\n（ボード一覧の「最近削除したボード」から戻せます）`).then((yes) => yes && st().deleteBoard(doc.id));
@@ -102,12 +104,18 @@ export function TopBar() {
       <span className="sep" />
       <button disabled={!canUndo} onClick={() => st().undo()} data-tip="元に戻す（⌘Z）" aria-label="元に戻す" className="ghost icon">{ICON.undo}</button>
       <button disabled={!canRedo} onClick={() => st().redo()} data-tip="やり直す（⇧⌘Z）" aria-label="やり直す" className="ghost icon">{ICON.redo}</button>
-      <button className="ghost" disabled={viewing} onClick={() => st().setDoc(tidy(st().doc))} data-tip="整頓: 機材の高さをそろえて線をまっすぐにし、折れ位置を並べ直す（⌘Z で戻せます）">
+      <button className="ghost" disabled={viewing || !!collab} onClick={() => st().setDoc(tidy(st().doc))} data-tip="整頓: 機材の高さをそろえて線をまっすぐにし、折れ位置を並べ直す（⌘Z で戻せます）">
         {ICON.tidy}
         整頓
       </button>
       <span className="sep" />
-      {saving === 'gone' ? (
+      {collab ? (
+        // A shared project's board: saved when the collaboration server has stored the edits, not when it has them.
+        <span className={`save-state ${saving}`} title={saving === 'error' ? `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。` : `共有中の案件「${doc.meta.project}」（試験中: 図形の移動だけを共有します）`}>
+          {saving === 'error' ? '共同編集先に保存できていません' : collab.pending && collab.link !== 'online' ? `オフライン・未送信 ${collab.pending} 件` : collab.pending ? '共同編集先に保存中…' : collab.link !== 'online' ? 'オフライン' : '共同編集先に保存済み'}
+          {saving === 'error' && <button onClick={() => void saveNow()}>もう一度</button>}
+        </span>
+      ) : saving === 'gone' ? (
         // Deleted elsewhere (another tab, the command line) while it was open here.
         <span className="save-state conflict">
           ほかの場所で削除されました
