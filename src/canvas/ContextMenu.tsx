@@ -21,6 +21,7 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
   });
   const selection = useStore((s) => s.selection);
   const nodes = useStore((s) => s.doc.nodes.filter((n) => s.selection.includes(n.id)).length);
+  const shared = useStore((s) => !!s.collab);
   useEffect(() => {
     const away = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
@@ -66,18 +67,18 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
           {item('切り取り', '⌘X', () => {
             copy();
             st().removeIds(st().selection);
-          }, !nodes)}
+          }, !nodes || shared)}
         </>
       )}
-      {item('貼り付け', '⌘V', () => pasteClipboard())}
+      {item('貼り付け', '⌘V', () => pasteClipboard(), shared)}
       {selection.length > 0 && (
         <>
-          {item('複製', '⌘D', () => duplicateSelection(), !nodes)}
+          {item('複製', '⌘D', () => duplicateSelection(), !nodes || shared)}
           <hr />
-          {item('最前面へ', '', () => restack('front'), !nodes)}
-          {item('最背面へ', '', () => restack('back'), !nodes)}
+          {item('最前面へ', '', () => restack('front'), !nodes || shared)}
+          {item('最背面へ', '', () => restack('back'), !nodes || shared)}
           <hr />
-          {item('削除', 'Delete', () => st().removeIds(st().selection))}
+          {item('削除', 'Delete', () => st().removeIds(st().selection), shared)}
         </>
       )}
       {selection.length === 0 && item('すべて選択', '⌘A', () => st().select([...st().doc.nodes.filter((n) => !isUnderlay(n)).map((n) => n.id), ...st().doc.edges.map((e) => e.id)]))}

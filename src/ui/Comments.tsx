@@ -19,7 +19,7 @@ function when(t?: number): string {
 export function CommentsPanel() {
   const st = useStore.getState;
   const doc = useStore((s) => s.doc);
-  const viewing = useStore((s) => !!s.viewing);
+  const locked = useStore((s) => !!s.viewing || !!s.collab);
   const selection = useStore((s) => s.selection);
   const [showDone, setShowDone] = useState(false);
   const all = commentsOf(doc).sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.y - b.y || a.x - b.x);
@@ -44,7 +44,7 @@ export function CommentsPanel() {
         </div>
         <button
           className={`mini settle${n.done ? '' : ' primary'}`}
-          disabled={viewing}
+          disabled={locked}
           onClick={(e) => {
             e.stopPropagation();
             settle(n, !n.done);
@@ -76,7 +76,7 @@ export function CommentsPanel() {
             </button>
             <button
               className="mini danger"
-              disabled={viewing}
+              disabled={locked}
               data-tip="解決済みの付箋をボードから消します（⌘Z で戻せます）"
               onClick={() => st().removeIds(done.map((n) => n.id))}
             >

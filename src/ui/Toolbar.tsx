@@ -206,11 +206,12 @@ export function Toolbar() {
   const tool = useStore((s) => s.tool);
   const library = useStore((s) => s.docks.library);
   const kind = kindOf(useStore((s) => s.doc));
+  const collab = useStore((s) => !!s.collab);
   const st = useStore.getState;
   return (
     <>
       <nav className="toolbar">
-        {TOOLS.filter((t) => kind.tools.includes(t.tool)).map((t) => (
+        {TOOLS.filter((t) => kind.tools.includes(t.tool) && (!collab || t.tool === 'select' || t.tool === 'pan')).map((t) => (
           <button
             key={t.tool}
             className={tool === t.tool ? 'on' : ''}
@@ -233,15 +234,17 @@ export function Toolbar() {
             {t.icon}
           </button>
         ))}
-        <button data-tip="画像・SVG（ドロップや貼り付けでも可）" aria-label="画像・SVG を埋め込む" onClick={pickImages}>
-          {ico(<path d="M3 4h14v12H3zM3 13l4-4 3 3 3-4 4 5M7 7.5h.01" />)}
-        </button>
-        {kind.library && (
+        {!collab && (
+          <button data-tip="画像・SVG（ドロップや貼り付けでも可）" aria-label="画像・SVG を埋め込む" onClick={pickImages}>
+            {ico(<path d="M3 4h14v12H3zM3 13l4-4 3 3 3-4 4 5M7 7.5h.01" />)}
+          </button>
+        )}
+        {kind.library && !collab && (
           <button data-tip="凡例（使っている線の色の一覧。色を変えると追従します）" aria-label="凡例を置く" {...placeable('凡例', () => makeLegend(new Set(), 0, 0), (at) => addLegend(at))}>
             {ico(<path d="M3 6h5M3 10h5M3 14h5M11 6h6M11 10h6M11 14h4" />)}
           </button>
         )}
-        {kind.library && (
+        {kind.library && !collab && (
           <>
             <hr />
             <button className={library ? 'on' : ''} data-tip={`${kind.library.label}ライブラリ（L）`} aria-label={`${kind.library.label}ライブラリ`} onClick={() => st().setDock('library')}>

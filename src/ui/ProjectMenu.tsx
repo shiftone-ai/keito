@@ -39,6 +39,7 @@ export function ProjectMenu() {
   const st = useStore.getState;
   const doc = useStore((s) => s.doc);
   const boards = useStore((s) => s.boards);
+  const collab = useStore((s) => s.collab);
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState(0);
   // The row the keys act on, read by the key handler as it is now.
@@ -46,7 +47,9 @@ export function ProjectMenu() {
   atRef.current = at;
   const mine = doc.meta.project?.trim() ?? '';
 
-  useEffect(() => noteVisit(mine, doc.id), [mine, doc.id]);
+  useEffect(() => {
+    if (!collab) noteVisit(mine, doc.id);
+  }, [collab, mine, doc.id]);
   useEffect(() => {
     const flip = () => setOpen((o) => !o);
     window.addEventListener('keito:project-menu', flip);
@@ -60,7 +63,8 @@ export function ProjectMenu() {
     const groups = new Map<string, { count: number; updated: number; latest: string }>();
     for (const b of boards) {
       const p = b.project?.trim() ?? '';
-      if (p === mine || b.id === doc.id) continue;
+      // Not left out on a shared board: a project of this machine with the shared one's name is another project.
+      if ((!collab && p === mine) || b.id === doc.id) continue;
       const g = groups.get(p) ?? { count: 0, updated: 0, latest: b.id };
       if (b.updated > g.updated) Object.assign(g, { updated: b.updated, latest: b.id });
       g.count++;
@@ -74,8 +78,9 @@ export function ProjectMenu() {
         return { project, count: g.count, board, at: v?.at ?? 0, updated: g.updated };
       })
       .sort((a, b) => b.at - a.at || b.updated - a.updated);
-  }, [open, boards, mine, doc.id]);
-  const here = boards.filter((b) => (b.project?.trim() ?? '') === mine && b.id !== doc.id).length + 1;
+  }, [open, boards, mine, doc.id, collab]);
+  const here = collab ? 1 : boards.filter((b) => (b.project?.trim() ?? '') === mine && b.id !== doc.id).length + 1;
+  const name = collab ? `${label(mine)}（共有中）` : label(mine);
 
   const go = (board: string) => {
     setOpen(false);
@@ -119,7 +124,7 @@ export function ProjectMenu() {
   return (
     <div className="project-switch">
       <button className="board-switch" onClick={() => setOpen((o) => !o)} data-tip={open ? undefined : 'ほかの案件へ（⌘K）'}>
-        <span>{label(mine)}</span>
+        <span>{name}</span>
         <i>▾</i>
       </button>
       {open && (
@@ -127,7 +132,7 @@ export function ProjectMenu() {
           <div className="project-menu-bg" onPointerDown={() => setOpen(false)} />
           <div className="project-menu" role="menu">
             <div className="project-item here">
-              <span className="name">{label(mine)}</span>
+              <span className="name">{name}</span>
               <small>{here} 枚 · 表示中</small>
             </div>
             {others.length > 0 && <div className="project-menu-head">最近開いた案件</div>}

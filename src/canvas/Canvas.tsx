@@ -15,7 +15,7 @@ import { EdgeView, HopCaps, INK, LabelChip, NodeView, SCREEN, STICKY_HEAD, TEXT,
 import { QuickBar } from '../ui/QuickBar';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
-import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, st } from './drag';
+import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, st } from './drag';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
 
@@ -235,6 +235,7 @@ function neededHeight(n: Node, text: string): number | null {
 
 export function Canvas() {
   const viewing = useStore((s) => !!s.viewing);
+  const collab = useStore((s) => !!s.collab);
   const svgRef = useRef<SVGSVGElement>(null);
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
@@ -364,6 +365,7 @@ export function Canvas() {
     const up = () => setSpace(false);
     // Leaving the window mid-gesture must not leave a drag or pan half-finished.
     const reset = () => {
+      endDrag(drag.current);
       drag.current = null;
       gesture = false;
       setSpace(false);
@@ -778,6 +780,7 @@ export function Canvas() {
 
   /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
   const onCancel = () => {
+    endDrag(drag.current);
     drag.current = null;
     gesture = false;
     lastPlan.current = null;
@@ -801,6 +804,7 @@ export function Canvas() {
     }
     setGuides({});
     setBusy(false);
+    if (d?.kind !== 'segment') endDrag(d);
     if (d?.kind === 'place') {
       // Worked out from the pointer itself: a quick drag may end before its outline was ever drawn.
       const p = world(e);
@@ -822,7 +826,7 @@ export function Canvas() {
         const route = simplify(pts).slice(1, -1);
         s.updateEdge(d.id, { route: route.length >= 2 ? route : undefined, tidied: undefined }, false);
       }
-      return;
+      return endDrag(d);
     }
     if (d?.kind === 'reconnect') {
       const s = st();
@@ -863,8 +867,9 @@ export function Canvas() {
   const selectedEdge = selection.length === 1 ? doc.edges.find((e) => e.id === selection[0]) : undefined;
   const handleNode = doc.nodes.find((n) => n.id === hover && n.id !== hush && hasHandles(n)) ?? (single && hasHandles(single) ? single : undefined);
   const hs = 8 / view.k;
-  // An old state from the history is only looked at: no handles, bar or dots to edit it with.
-  const idle = tool === 'select' && !editing && !busy && !viewing;
+  // Hidden rather than refused when used: an old state from the history is only looked at, and a
+  // shared board takes only moves so far.
+  const idle = tool === 'select' && !editing && !busy && !viewing && !collab;
   const cursor = space || tool === 'pan' ? 'grab' : tool === 'select' && !placing ? 'default' : 'crosshair';
   // What waits to be placed, outlined under the pointer: a library item, or the box an armed tool makes.
   const waiting = placing ? { label: placing.label, size: placing.size } : placesBox(tool) && boxSize(tool) && !busy ? { label: '', size: boxSize(tool)! } : null;

@@ -56,6 +56,14 @@ export const canConnect = (n: Node): n is Flowable => n.type === 'shape' || n.ty
 
 export const st = useStore.getState;
 
+/**
+ * A drag that changed the board ends its operation when the drag ends, however it ends: a shared
+ * board places what it moved then (see editCollab in store.ts).
+ */
+export function endDrag(d: Drag | null): void {
+  if (d && 'moved' in d && d.moved) st().commitOperation();
+}
+
 export const portOf = (doc: Doc, end: EdgeEnd) => {
   const n = doc.nodes.find((x) => x.id === end.node);
   return n?.type === 'device' ? n.ports.find((p) => p.id === end.port) : undefined;

@@ -3,12 +3,15 @@ import { Conflict, Gone } from '../src/platform/storage';
 import type { Backend, BoardNews } from '../src/platform/storage';
 import type { Doc } from '../src/model/types';
 
-/** The store runs in a page: give it just enough of one. Returns the page's event listeners. */
-export function stubPage(): { listeners: Record<string, (e?: unknown) => void>; storage: Map<string, string> } {
+/**
+ * The store runs in a page: give it just enough of one. Returns the page's event listeners. Timers
+ * are fake unless `realTimers` (for talking to a real server).
+ */
+export function stubPage({ realTimers = false } = {}): { listeners: Record<string, (e?: unknown) => void>; storage: Map<string, string> } {
   const listeners: Record<string, (e?: unknown) => void> = {};
   const handlers = new Map<string, Set<(e?: unknown) => void>>();
   const storage = new Map<string, string>();
-  vi.useFakeTimers();
+  if (!realTimers) vi.useFakeTimers();
   vi.stubGlobal('window', {
     setTimeout, clearTimeout,
     addEventListener: (k: string, f: (e?: unknown) => void) => {

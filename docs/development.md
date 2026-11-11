@@ -13,6 +13,8 @@ npm run app      # デスクトップアプリ（Tauri）を開発モードで�
 npm run app:build  # デスクトップアプリをビルド（src-tauri/target/release/bundle/ に .app と .dmg）
 npm run app:release  # 署名・公証済みの .dmg を作る（人に配るとき。下の「配布用のビルド」）
 npm run app:release:windows  # Windows 版のインストーラーを Mac でクロスビルドする（下の「Windows 版」）
+npm run collab -- serve  # 共同編集サーバーを起動（下の「共有案件（試験中）」）
+npx playwright test      # 2 つのブラウザで共有案件を確かめる E2E（初回は npx playwright install chromium）
 ```
 
 ## 構成
@@ -23,10 +25,35 @@ src/canvas/    SVG 描画（画面とエクスポートで共通）とキャン�
 src/export/    PNG / SVG / PDF / Excel
 src/ui/        ツールバー・インスペクタ・各パネル
 src/platform/  保存先とファイル入出力の境界（ブラウザ版とデスクトップアプリで差し替える）
+src/collab/    共有案件の Yjs のデータの形、保存確認のやり取り、共同編集サーバーへの接続
 server/        ボードのフォルダの読み書き（store.ts: 開発サーバーと CLI で共通）と、開発サーバーの保存 API・変更通知
+server/collab/ 共同編集サーバー（Hocuspocus）と、その SQLite の保存先・管理コマンド（npm run collab）
 cli/           コマンドライン（npm run keito）
+e2e/           ブラウザでの E2E（Playwright）
 .claude/       Claude Code 向けの使い方（skills/keito）
 ```
+
+## 共有案件（試験中）
+
+共有案件は、共同編集サーバーを通して、複数のブラウザで同じボードを編集する機能です。試験中のため、`VITE_KEITO_COLLAB=1` を付けて起動・ビルドしたアプリだけが参加リンクを開きます。共有できる操作は図形の移動だけで、共有中のボードでは、ほかの操作を受け付けません。
+
+```sh
+npm run collab -- init 会場A        # 共有案件を作る（ボード 1 枚と図形 1 つ）。案件の id（project）が出る
+npm run collab -- grant <案件 id> --server ws://localhost:1235 --app http://localhost:5183/
+                                    # 編集できる権限を作り、参加リンクを出す
+npm run collab -- serve             # 共同編集サーバーを起動（既定のポートは 1235）
+VITE_KEITO_COLLAB=1 npm run dev     # アプリを起動し、参加リンクをブラウザで開く
+```
+
+- 共同編集サーバーは、Vite の開発サーバーとは別のプロセスです。`--host`・`--port`（または `KEITO_COLLAB_HOST`・`KEITO_COLLAB_PORT`）で待ち受け先を変えられます。
+- データは `--data` のフォルダ（既定は `$KEITO_COLLAB_DATA`、なければ `./collab-data`）の `keito-collab.sqlite` に置きます。WAL を使うので、同じフォルダの `keito-collab.sqlite-wal`・`-shm` もデータの一部です。バックアップは、サーバーを止めてからフォルダごと取ります。
+- 1 つのデータのフォルダは、1 台のサーバーだけで使います。複数のサーバーで同じ案件を扱う構成には対応していません。
+- サーバーは暗号化しない WebSocket（`ws://`）で待ち受けます。手元のネットワークの外から使うときは、手前の reverse proxy で TLS を終端し、`grant` の `--server` に `wss://` の URL を渡します。
+- 参加リンクには権限の token が入っています。アプリは token をブラウザに保存してアドレスから外し、次からは `#/s/<案件 id>` だけで開きます。サーバーには token の hash だけを保存します。
+- 案件は `init` で作ったものだけを開けます。アプリが空の案件を見つけて作ったり、手元のボードの JSON を案件に入れたりはしません。
+- 共同編集サーバーにつながらないときは、参加リンクを開いても手元のボードのままで、「共同編集先に接続できません」と出ます。
+- 変更は、アプリが保存を頼み、サーバーが SQLite に書き込んでから「共同編集先に保存済み」になります。サーバーは、こうして頼まれた変更だけを案件に入れ、Yjs の同期で届いた変更は受け付けません。書き込めなかった変更はブラウザが持ち続け、「共同編集先に保存できていません」と出して、間をあけて送り直します。同じ変更を何度送っても、サーバーは 1 回だけ保存します。
+- 共有中のボードは、ボードのフォルダやブラウザの保存先には書き込みません。CLI（`npm run keito`）からも読み書きできません。
 
 ## 配布用のビルド
 
