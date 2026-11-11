@@ -43,22 +43,23 @@ describe('going to another tab and back', () => {
   });
 });
 
-describe('the next and the previous tab (⌘⇧] / ⌘⇧[)', () => {
-  const boards: BoardInfo[] = [
-    { id: 'seq', title: 'A', updated: 0, project: 'P', kind: 'sequence' },
-    { id: 'c', title: 'C', updated: 0, project: 'P' },
-    { id: 'b', title: 'B', updated: 0, project: 'P', kind: 'system' },
-    { id: 'free', title: 'Z', updated: 0, project: 'P', kind: 'free' },
-    { id: 'other', title: 'O', updated: 0, project: 'Q' },
-  ];
-  const open = (id: string): Doc => {
-    const b = boards.find((x) => x.id === id)!;
-    return { ...blank(id), kind: b.kind, meta: { title: b.title, project: b.project ?? '' } };
-  };
+/** Project P's tabs, in the order shown: B, C (system), A (sequence), Z (free); O alone in project Q. */
+const boards: BoardInfo[] = [
+  { id: 'seq', title: 'A', updated: 0, project: 'P', kind: 'sequence' },
+  { id: 'c', title: 'C', updated: 0, project: 'P' },
+  { id: 'b', title: 'B', updated: 0, project: 'P', kind: 'system' },
+  { id: 'free', title: 'Z', updated: 0, project: 'P', kind: 'free' },
+  { id: 'other', title: 'O', updated: 0, project: 'Q' },
+];
+const open = (id: string): Doc => {
+  const b = boards.find((x) => x.id === id)!;
+  return { ...blank(id), kind: b.kind, meta: { title: b.title, project: b.project ?? '' } };
+};
+const unfiled: Doc = { ...blank('x'), meta: { title: 'X', project: '' } };
 
+describe('the next and the previous tab (⌘⇧] / ⌘⇧[)', () => {
   it('goes along the tabs as they are shown, and round from either end', async () => {
     const { boardBeside } = await import('../src/ui/BoardTabs');
-    // The tabs: B, C (system), A (sequence), Z (free).
     expect(boardBeside(open('b'), boards, 1)).toBe('c');
     expect(boardBeside(open('c'), boards, 1)).toBe('seq');
     expect(boardBeside(open('free'), boards, 1)).toBe('b');
@@ -68,14 +69,47 @@ describe('the next and the previous tab (⌘⇧] / ⌘⇧[)', () => {
   it('goes nowhere from a board alone in its project, or in none', async () => {
     const { boardBeside } = await import('../src/ui/BoardTabs');
     expect(boardBeside(open('other'), boards, 1)).toBeUndefined();
-    expect(boardBeside({ ...blank('x'), meta: { title: 'X', project: '' } }, boards, -1)).toBeUndefined();
+    expect(boardBeside(unfiled, boards, -1)).toBeUndefined();
+  });
+});
+
+describe('a tab by its place (⌘1–⌘8, and ⌘9 for the last)', () => {
+  it('counts the tabs as they are shown, the last from the end, and finds none past them', async () => {
+    const { boardAt } = await import('../src/ui/BoardTabs');
+    expect(boardAt(open('c'), boards, 0)).toBe('b');
+    expect(boardAt(open('c'), boards, 2)).toBe('seq');
+    expect(boardAt(open('c'), boards, -1)).toBe('free');
+    expect(boardAt(open('c'), boards, 4)).toBeUndefined();
+  });
+
+  it('finds none past the board itself when it is alone in its project, or in none', async () => {
+    const { boardAt } = await import('../src/ui/BoardTabs');
+    expect(boardAt(open('other'), boards, 1)).toBeUndefined();
+    expect(boardAt(unfiled, boards, 1)).toBeUndefined();
+  });
+});
+
+/** A key press: the character, the modifiers held, and the key itself (e.code) where it matters. */
+const press = (key: string, held: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}, code = '') =>
+  ({ key, code, ctrlKey: !!held.ctrl, metaKey: !!held.meta, shiftKey: !!held.shift, altKey: !!held.alt }) as KeyboardEvent;
+
+describe('the keys for a tab by its place', () => {
+  it.each([
+    ['⌘1', 0, press('1', { meta: true }, 'Digit1')],
+    ['Ctrl+8', 7, press('8', { ctrl: true }, 'Digit8')],
+    ['⌘9', -1, press('9', { meta: true }, 'Digit9')],
+    // A digit typed alone, ⌘0 (zoom in other apps), and the digits with Shift or ⌥ go elsewhere.
+    ['1', undefined, press('1', {}, 'Digit1')],
+    ['⌘0', undefined, press('0', { meta: true }, 'Digit0')],
+    ['⌘⇧1', undefined, press('!', { meta: true, shift: true }, 'Digit1')],
+    ['⌘⌥1', undefined, press('¡', { meta: true, alt: true }, 'Digit1')],
+  ] as const)('%s goes to place %s', async (_, at, e) => {
+    const { tabPlace } = await import('../src/ui/tabKeys');
+    expect(tabPlace(e)).toBe(at);
   });
 });
 
 describe('the keys for the next and the previous tab', () => {
-  const press = (key: string, held: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}) =>
-    ({ key, ctrlKey: !!held.ctrl, metaKey: !!held.meta, shiftKey: !!held.shift, altKey: !!held.alt }) as KeyboardEvent;
-
   it.each([
     ['⌃Tab', 1, press('Tab', { ctrl: true })],
     ['Ctrl+PageDown', 1, press('PageDown', { ctrl: true })],
