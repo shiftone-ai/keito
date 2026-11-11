@@ -1,8 +1,9 @@
-import type { ShareStatus, SharedJoin, SharedProject } from '../collab/client';
-import { sharedAddress } from '../collab/join';
+import type { ShareStatus, SharedJoin } from '../collab/client';
+import type { SharedBoardInfo } from '../collab/model';
+import { sharedTarget } from '../collab/target';
 import { pinComments } from './comments';
 import { fitLegends } from './legend';
-import { drawingOf, entryFor, fingerprint, thin } from './history';
+import { drawingOf, entryFor, fingerprint, sameBoard, stillIn, thin } from './history';
 import { create } from 'zustand';
 import { type Backend, type BoardInfo, Conflict, Gone, type TrashedBoard, connect, externalize, localBoards } from '../platform/storage';
 import { ask, shortcuts, tell } from '../platform/io';
@@ -14,7 +15,7 @@ import { allIds, freshId, makeNode, randomId } from './presets';
 import { sampleBoards } from './sample';
 import { registerSignals } from './signals';
 import { type Entry, type ShareNode, catalog, newKey, pull, stamp, takeFrom } from './shared';
-import { type Doc, type Edge, type Node, type Pt, type Rect, type Revision, type UserPreset, emptyMeta } from './types';
+import { type Doc, type Edge, type Node, type Rect, type Revision, type UserPreset, emptyMeta } from './types';
 
 export type Tool = 'select' | 'pan' | 'rect' | 'round' | 'diamond' | 'ellipse' | 'cloud' | 'sticky' | 'text' | 'frame' | 'sequence';
 /** A window over the board (one at a time). */
@@ -63,13 +64,14 @@ function showInUrl(id: string): void {
   localStorage.setItem(CURRENT, id);
 }
 
-/** The shared project whose board is on screen (see openCollab), and how this page stands with its server. */
+/**
+ * The shared project whose board is on screen (see openCollab), how this page stands with its
+ * server, and the project's boards (its tabs).
+ */
 export interface CollabState extends ShareStatus {
   project: string;
+  boards: SharedBoardInfo[];
 }
-
-/** Said when a shared board is asked for an edit it does not take yet. */
-export const COLLAB_ONLY = '共有中のボードでは、まだ図形の移動しかできません';
 
 export interface EditOperation {
   readonly origin: unknown;
@@ -79,7 +81,7 @@ export interface OperationEvent extends EditOperation {
   phase: 'begin' | 'commit' | 'cancel';
 }
 
-interface State {
+export interface State {
   doc: Doc;
   past: Doc[];
   future: Doc[];
@@ -173,6 +175,60 @@ interface State {
   openAt(boardId: string, nodeId: string): void;
 }
 
+/**
+ * Where the board on screen is kept, chosen as it is put on screen: this machine's store (show) or a
+ * shared project (openCollab). All the session does that depends on it goes through it: which edits
+ * the board takes, how an operation ends or is called off, what is written where, leaving the board,
+ * and opening its other boards. Anything new that writes the board belongs here, not in a check of
+ * which board is on screen.
+ */
+export interface Target {
+  /** An edit of the board on screen (setDoc); `record` makes it an undo step of its own. */
+  edit(next: Doc, record: boolean): void;
+  /** An operation begins on the board as it is now (checkpoint). */
+  begin(): void;
+  /** The operation under way has ended. */
+  end(): void;
+  /** Call off the last step, leaving it to no redo (dropStep): false when there is none. */
+  drop(): boolean;
+  undo(): void;
+  redo(): void;
+  /** Whether a tool may be armed, or text typed into the board ('typing'); the user is told when not. */
+  takes(what: Tool | 'typing'): boolean;
+  /** Run an action on the board in this machine's store (its history, its project); refused, and said, where it is kept elsewhere. */
+  run(fn: (b: Backend, current: () => boolean) => Promise<void>): Promise<void>;
+  /** Open one of its boards: false when it has none of that id, which is then one of this machine's. */
+  open(id: string): boolean;
+  /** Delete one of its boards: false when it has none of that id, which is then one of this machine's. */
+  remove(id: string): boolean;
+  /** Keep a picture for the board; the `src` an image node should hold. */
+  keepImage(dataUrl: string): Promise<string>;
+  /** The state on screen changed (an edit, another board shown …): what follows from it in the store. */
+  changed(s: State, prev: State): void;
+  /** Take in the board as this machine's store has it now (written elsewhere meanwhile). */
+  pickUp(): void;
+  /** Read the other boards of its project, as this machine's store has them. */
+  readProject(): Promise<void>;
+  /** Something done alongside the board failed (see run). */
+  failed(): void;
+  /** Write what is pending now; whether all of it is kept. */
+  flush(): Promise<boolean>;
+  /** ⌘S, or "もう一度" after a failed write. */
+  saveNow(): Promise<void>;
+  /** Whether the board may be left: its edits kept, or the user letting go of the rest. */
+  leave(): Promise<boolean>;
+  /** The board is left for another (as it was before leaving): what is kept here for a return to it. */
+  keepSteps(was: State): void;
+  /** The page is being closed: whether edits would be lost (the browser asks first). */
+  closing(): boolean;
+  /** The page is going: what can still be written is. */
+  gone(): void;
+  /** Show the board's address. */
+  address(id: string): void;
+  /** Stop: nothing more of the board on screen is done through it. */
+  close(): void;
+}
+
 /** A session owns its editor, pending work and page subscriptions. */
 export function createEditSession(options: { page?: boolean } = {}) {
   let disposed = false;
@@ -200,10 +256,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     cleanups.push(() => window.removeEventListener(type, listener));
   }
   function showAddress(id: string): void {
-    if (!options.page) return;
-    if (!collab) return showInUrl(id);
-    const address = sharedAddress(collab.id);
-    if (location.hash !== address) history.replaceState(null, '', `${location.pathname}${location.search}${address}`);
+    if (options.page) target.address(id);
   }
 
   let backend: Backend | null = null;
@@ -225,28 +278,24 @@ export function createEditSession(options: { page?: boolean } = {}) {
     commitOperation();
     const step = { origin: context.origin === undefined ? 'local' : context.origin, board: s.doc.id };
     operation = step;
-    // A shared board is not undone by putting back a whole earlier board: that would undo others' edits too.
-    if (!collab) set({ past: [...s.past.slice(-HISTORY), s.doc], future: [] });
+    target.begin();
     operations.forEach((hear) => hear({ ...step, phase: 'begin' }));
   }
   function commitOperation(): void {
     if (!operation) return;
     const done = operation;
     operation = null;
-    if (collab) placeMoved();
+    target.end();
     operations.forEach((hear) => hear({ ...done, phase: 'commit' }));
   }
   function dropStep(): void {
-    const s = useStore.getState();
-    const doc = s.past.at(-1);
-    if (!doc && !collab) return;
     const done = operation;
+    // Cleared before the step is put back: what it is put back with is no part of the operation.
     operation = null;
-    if (collab) {
-      moved.clear();
-      showCollabBoard();
-      set({ selection: [], editing: null });
-    } else if (doc) set({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), selection: [], editing: null });
+    if (!target.drop()) {
+      operation = done;
+      return;
+    }
     if (done) operations.forEach((hear) => hear({ ...done, phase: 'cancel' }));
   }
 
@@ -286,9 +335,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         // An earlier state on screen is for looking at: an edit there would be lost, or restored
         // along with it unseen.
         if (get().viewing) return;
-        if (collab) return editCollab(doc, record);
-        if (record) checkpoint();
-        set({ doc: fitLegends(pinComments(get().doc, doc)) });
+        target.edit(doc, record);
       },
       mutate: (fn, record = true) => get().setDoc(fn(get().doc), record),
       updateNode: (id, patch, record = true) =>
@@ -309,29 +356,19 @@ export function createEditSession(options: { page?: boolean } = {}) {
         set({ selection: [], editing: null });
         if (along && !get().viewing) say(`つながっていた線 ${along} 本も一緒に消しました（⌘Z で戻せます）`);
       },
-      // The board's history list is not part of the drawing: undo takes back drawing, never a kept state.
-      // What was selected stays selected where it is still there, to try the next change on it.
       undo: () => {
         commitOperation();
-        if (collab) return say(COLLAB_ONLY);
-        set((s) => {
-          const doc = s.past[s.past.length - 1];
-          return doc ? { doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), future: [s.doc, ...s.future], selection: stillIn(doc, s.selection), editing: null } : s;
-        });
+        target.undo();
       },
       redo: () => {
         commitOperation();
-        if (collab) return say(COLLAB_ONLY);
-        set((s) => {
-          const doc = s.future[0];
-          return doc ? { doc: { ...doc, revisions: s.doc.revisions }, past: [...s.past, s.doc], future: s.future.slice(1), selection: stillIn(doc, s.selection), editing: null } : s;
-        });
+        target.redo();
       },
       select: (selection) => set({ selection }),
       // Arming a tool puts away whatever was waiting to be placed.
-      setTool: (tool) => (collab && tool !== 'select' && tool !== 'pan' ? say(COLLAB_ONLY) : set({ tool, placing: null })),
+      setTool: (tool) => void (target.takes(tool) && set({ tool, placing: null })),
       setView: (view) => set({ view }),
-      setEditing: (editing) => (collab && editing ? say(COLLAB_ONLY) : set({ editing })),
+      setEditing: (editing) => void ((!editing || target.takes('typing')) && set({ editing })),
       setPanel: (panel) => set({ panel }),
       setDock: (dock, on) => set((s) => ({ docks: { ...s.docks, [dock]: on ?? !s.docks[dock] } })),
       fit: () => {
@@ -349,17 +386,13 @@ export function createEditSession(options: { page?: boolean } = {}) {
         // Not started over: a new request supersedes the load under way, so a key held down would
         // keep the board from opening.
         if (id === loading?.id) return;
-        void run(async (b, current) => {
-          const result = await switchTo(b, id);
-          if (result === 'stayed') showAddress(get().doc.id);
-          else if (result === 'unreadable') await reportUnreadable(b, current);
-        });
+        if (!target.open(id)) local.open(id);
       },
       newBoard: (doc = emptyDoc()) => void run(async (b, current) => {
         const request = { id: doc.id };
         loading = request;
         try {
-          if (!(await leave(b)) || !current() || loading !== request) return;
+          if (!(await leave()) || !current() || loading !== request) return;
           // A file opened from elsewhere may carry its pictures inline; give them a home in the board's folder.
           // History belongs to the board it was recorded on; a copy or an opened file starts without one.
           // An opened file may be of an older form: it is read the way a stored board is.
@@ -378,8 +411,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
           if (loading === request) loading = undefined;
         }
       }),
-      nameState: (name) => void run(async (b) => {
-        if (collab) return say(COLLAB_ONLY);
+      nameState: (name) => void target.run(async (b) => {
         if (get().viewing || !name.trim()) return;
         const doc = get().doc;
         const last = doc.revisions?.at(-1);
@@ -387,15 +419,13 @@ export function createEditSession(options: { page?: boolean } = {}) {
         if (last && last.hash === fingerprint(doc)) return setRevisions(b, doc.id, (list) => list.map((r) => (r.id === last.id ? { ...r, name: name.trim() } : r)));
         await snapshot(b, doc, { name: name.trim() });
       }),
-      renameRevision: (id, name) => void run(async (b) => {
-        if (collab) return say(COLLAB_ONLY);
+      renameRevision: (id, name) => void target.run(async (b) => {
         const board = (live ?? get().doc).id;
         await setRevisions(b, board, (list) => list.map((r) => (r.id === id ? { ...r, name: name.trim() || undefined } : r)));
       }),
-      viewRevision: (id) => void run(async (b, current) => {
-        if (collab) return say(COLLAB_ONLY);
+      viewRevision: (id) => void target.run(async (b, current) => {
         // The board as it is goes into the history before an older state takes its place on screen.
-        if (!get().viewing && !(await leave(b))) return;
+        if (!get().viewing && !(await leave())) return;
         if (!current()) return;
         const base = live ?? get().doc;
         const all = base.revisions ?? [];
@@ -416,7 +446,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         set({ doc, viewing: null, past: [], future: [], selection: [], editing: null });
         frame(get().fit);
       },
-      restoreRevision: () => void run(async (b, current) => {
+      restoreRevision: () => void target.run(async (b, current) => {
         const { viewing, doc } = get();
         if (!viewing || !live) return;
         const before = live;
@@ -430,8 +460,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         // The old drawing becomes the live board (and is saved); undo brings back what it replaced.
         set({ doc: { ...doc, revisions: kept ?? before.revisions }, viewing: null, past: [before], future: [], selection: [], editing: null });
       }),
-      deleteRevision: (id) => void run(async (b) => {
-        if (collab) return say(COLLAB_ONLY);
+      deleteRevision: (id) => void target.run(async (b) => {
         if (get().viewing) return;
         const board = get().doc.id;
         await b.removeRevision(board, id);
@@ -474,8 +503,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         if (active()) set({ presets });
       }),
       renameProject: (from, to) =>
-        void run(async (b) => {
-          if (collab) return say(COLLAB_ONLY);
+        void target.run(async (b) => {
           const name = to.trim();
           // An older state on screen is never written; the live board must be the one renamed.
           if (!name || name === from || get().viewing) return;
@@ -506,8 +534,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
           if (missed.length) void tell(`次のボードは案件名を変えられませんでした（ほかで更新中など）: ${missed.join('、')}`);
         }),
       resolveConflict: (choice) =>
-        void run(async (b, current) => {
-          if (collab) return;
+        void target.run(async (b, current) => {
           const mine = get().doc;
           if (choice === 'overwrite') {
             await b.save(mine, true);
@@ -527,21 +554,19 @@ export function createEditSession(options: { page?: boolean } = {}) {
           // This page's version stays one undo away, should it be wanted after all.
           adopt(shown, () => set({ doc: shown, past: [mine], future: [], selection: get().selection.filter((id) => fresh.nodes.some((n) => n.id === id) || fresh.edges.some((e) => e.id === id)), saving: 'saved' }));
         }),
-      linkTo: (nodeId, target) =>
-        void run(async (b) => {
-          if (collab) return say(COLLAB_ONLY);
+      linkTo: (nodeId, to) =>
+        void target.run(async (b) => {
           if (get().viewing) return;
           const current = scope();
-          const key = await shareKey(b, target);
+          const key = await shareKey(b, to);
           if (!current() || !key) return;
-          const fresh = (get().others.find((d) => d.id === target.board)?.nodes.find((n) => n.id === target.node.id) as ShareNode | undefined) ?? target.node;
+          const fresh = (get().others.find((d) => d.id === to.board)?.nodes.find((n) => n.id === to.node.id) as ShareNode | undefined) ?? to.node;
           // The other board's particulars win: it is the one being linked to.
           sharing(() => get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...takeFrom(n, fresh), shared: key, sharedAt: fresh.sharedAt } : n)) })));
         }),
       unlink: (nodeId) => get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...n, shared: undefined, sharedAt: undefined } : n)) })),
       runOn: (nodeId, host) =>
-        void run(async (b) => {
-          if (collab) return say(COLLAB_ONLY);
+        void target.run(async (b) => {
           if (get().viewing) return;
           const current = scope();
           const key = host ? ((await shareKey(b, host)) ?? undefined) : undefined;
@@ -556,16 +581,62 @@ export function createEditSession(options: { page?: boolean } = {}) {
           // After the board has been fitted to the window: the node, in the middle.
           frame(() => frame(() => centerOn(nodeId)));
         }),
-      deleteBoard: (id) => void run(async (b) => {
-        if (collab?.board === id) return say(COLLAB_ONLY);
-        if (id === get().doc.id) clearTimeout(timer);
+      deleteBoard: (id) => {
+        if (!target.remove(id)) local.remove(id);
+      },
+    };
+  });
+
+  /** The target of a board in this machine's store (see show): the boards folder, or this browser. */
+  const local: Target = {
+    edit(next, record) {
+      if (record) checkpoint();
+      set({ doc: fitLegends(pinComments(useStore.getState().doc, next)) });
+    },
+    begin() {
+      const s = useStore.getState();
+      set({ past: [...s.past.slice(-HISTORY), s.doc], future: [] });
+    },
+    end: () => {},
+    drop() {
+      const s = useStore.getState();
+      const doc = s.past.at(-1);
+      if (!doc) return false;
+      set({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), selection: [], editing: null });
+      return true;
+    },
+    // The board's history list is not part of the drawing: undo takes back drawing, never a kept state.
+    // What was selected stays selected where it is still there, to try the next change on it.
+    undo: () =>
+      set((s) => {
+        const doc = s.past[s.past.length - 1];
+        return doc ? { doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), future: [s.doc, ...s.future], selection: stillIn(doc, s.selection), editing: null } : s;
+      }),
+    redo: () =>
+      set((s) => {
+        const doc = s.future[0];
+        return doc ? { doc: { ...doc, revisions: s.doc.revisions }, past: [...s.past, s.doc], future: s.future.slice(1), selection: stillIn(doc, s.selection), editing: null } : s;
+      }),
+    takes: () => true,
+    run,
+    open(id) {
+      void run(async (b, current) => {
+        const result = await switchTo(b, id);
+        if (result === 'stayed') showAddress(useStore.getState().doc.id);
+        else if (result === 'unreadable') await reportUnreadable(b, current);
+      });
+      return true;
+    },
+    remove(id) {
+      void run(async (b) => {
+        if (id === useStore.getState().doc.id) clearTimeout(timer);
         await b.remove(id);
         if (!active()) return;
         const boards = await b.list();
         if (!active()) return;
         // A deleted fellow of the project is no longer written to when something shared changes.
-        set({ boards, others: get().others.filter((d) => d.id !== id) });
-        if (id !== get().doc.id) return;
+        set({ boards, others: useStore.getState().others.filter((d) => d.id !== id) });
+        if (id !== useStore.getState().doc.id) return;
         const current = scope();
         const request = { id };
         loading = request;
@@ -584,9 +655,31 @@ export function createEditSession(options: { page?: boolean } = {}) {
         } finally {
           if (loading === request) loading = undefined;
         }
-      }),
-    };
-  });
+      });
+      return true;
+    },
+    keepImage: keepImageLocal,
+    changed(s, prev) {
+      keepHistory(s, prev);
+      stampShared(s, prev);
+      followProject(s, prev);
+      autosave(s, prev);
+    },
+    pickUp: () => void run(pickUp),
+    readProject,
+    failed() {
+      if (useStore.getState().doc !== stored) set({ saving: 'error' });
+    },
+    flush: flushLocal,
+    saveNow: saveLocal,
+    leave: leaveLocal,
+    keepSteps,
+    closing: closingLocal,
+    gone: exitLocal,
+    address: showInUrl,
+    close: () => {},
+  };
+  let target: Target = local;
 
   /** Deleted boards that can be put back (none before storage is connected). */
   const deletedBoards = async (): Promise<TrashedBoard[]> => (backend ? backend.trash() : []);
@@ -617,7 +710,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       console.error(e);
       // Something done alongside the board (a preset, a state of its history, opening another)
       // failed: said so, without calling a board that is saved unsaved.
-      if (!collab && useStore.getState().doc !== stored) set({ saving: 'error' });
+      target.failed();
       void tell(`うまくいきませんでした: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -760,7 +853,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
    */
   function resetSession(doc: Doc, shown: Doc): void {
     commitOperation();
-    closeCollab();
+    target.close();
     generation++;
     loading = undefined;
     clearTimeout(pushTimer);
@@ -783,15 +876,9 @@ export function createEditSession(options: { page?: boolean } = {}) {
    * (not changed meanwhile from the command line, say), where those steps still apply.
    */
   const kept = new Map<string, { past: Doc[]; future: Doc[]; view: View; print: string }>();
-  /** Keep the undo steps of the board being left, when they are its own (not an old state's or a shared board's). */
+  /** Keep the undo steps of the board being left, when they are its own (not an old state's). */
   function keepSteps(was: State): void {
-    if (!was.viewing && !was.collab) kept.set(was.doc.id, { past: was.past, future: was.future, view: was.view, print: fingerprint(was.doc) });
-  }
-
-  /** The ids of a selection that a state of the board still has. */
-  function stillIn(doc: Doc, ids: string[]): string[] {
-    const here = new Set([...doc.nodes.map((n) => n.id), ...doc.edges.map((e) => e.id)]);
-    return ids.filter((id) => here.has(id));
+    if (!was.viewing) kept.set(was.doc.id, { past: was.past, future: was.future, view: was.view, print: fingerprint(was.doc) });
   }
 
   /** Put a freshly loaded (or created) board on screen. */
@@ -799,6 +886,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
     // The base is the board as shown (legends fitted), so fitting alone never reads as an edit.
     const shown = fitLegends(doc);
     resetSession(doc, shown);
+    target = local;
     const back = kept.get(doc.id);
     kept.delete(doc.id);
     const same = !!back && back.print === fingerprint(shown);
@@ -809,114 +897,55 @@ export function createEditSession(options: { page?: boolean } = {}) {
     void readProject();
   }
 
-  /** The shared project whose board is on screen, and how to stop hearing of it. */
-  let collab: { id: string; project: SharedProject; board: string; stop: () => void } | null = null;
-  /** Nodes moved by the operation under way on a shared board: shown here, placed in the project when it ends. */
-  const moved = new Map<string, Pt>();
-
   /**
    * Open a shared project's board in place of the board on screen, once the server has let this page
-   * in and sent the project. Turned away (no grant for the project, another schema) or not reached,
-   * the board on screen stays and the user is told why.
+   * in and sent the project; whether it was. Turned away (no grant for the project, another schema)
+   * or not reached, the board on screen stays and the user is told why.
    */
-  async function openCollab(join: SharedJoin): Promise<void> {
+  async function openCollab(join: SharedJoin): Promise<boolean> {
     const b = backend;
     const current = scope();
-    if (!b) return;
+    if (!b) return false;
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
     const { joinProject } = await import('../collab/client');
-    if (!current()) return;
+    if (!current()) return false;
     const project = joinProject(join);
     try {
       await project.ready;
     } catch (e) {
       project.close();
       if (current()) void tell(e instanceof Error ? e.message : String(e));
-      return;
+      return false;
     }
     const board = project.boards()[0]?.id;
     const doc = board ? project.board(board) : null;
     if (!current() || !board || !doc) {
       project.close();
       if (current()) void tell('共有案件にボードがありません');
-      return;
+      return false;
     }
     const was = useStore.getState();
     // Not `leave` while starting: no board is on screen yet, only the empty one the page begins with.
-    if ((collab || stored) && !(await leave(b))) return project.close();
-    if (!current()) return project.close();
-    if (stored) keepSteps(was);
+    if ((stored && !(await leave())) || !current()) {
+      project.close();
+      return false;
+    }
+    if (stored) target.keepSteps(was);
     resetSession(doc, doc);
-    collab = { id: join.project, project, board, stop: project.listen(showCollabBoard) };
-    set({ doc, viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...collabStatus() });
-    showAddress(doc.id);
-    frame(useStore.getState().fit);
-  }
-
-  function closeCollab(): void {
-    if (!collab) return;
-    collab.stop();
-    collab.project.close();
-    collab = null;
-    moved.clear();
-  }
-
-  function collabStatus(): Pick<State, 'collab' | 'saving' | 'saveError'> {
-    if (!collab) return { collab: null, saving: 'saved', saveError: null };
-    const status = collab.project.status();
-    return {
-      collab: { ...status, project: collab.id },
-      saving: status.failure ? 'error' : status.pending ? 'saving' : 'saved',
-      saveError: status.failure,
-    };
-  }
-
-  /** Put the shared board on screen as the project has it now, with the moves under way here on top. */
-  function showCollabBoard(): void {
-    if (!collab || !active()) return;
-    const s = useStore.getState();
-    const fresh = collab.project.board(collab.board);
-    const next = fresh && (moved.size ? withMoves(fresh, moved) : fresh);
-    const doc = next && !sameBoard(next, s.doc) ? next : s.doc;
-    const selection = stillIn(doc, s.selection);
-    set({ doc, ...(selection.length === s.selection.length ? {} : { selection }), ...collabStatus() });
-  }
-
-  /**
-   * An edit of the shared board: moves of its nodes are shown at once and placed in the project when
-   * the operation ends (an edit made outside one is an operation of its own); any other change is
-   * turned away.
-   */
-  function editCollab(next: Doc, record: boolean): void {
-    const moves = movesBetween(useStore.getState().doc, next);
-    if (!moves) return say(COLLAB_ONLY);
-    if (!moves.size) return;
-    const alone = record || !operation;
-    if (alone) checkpoint();
-    for (const [id, at] of moves) moved.set(id, at);
-    set({ doc: withMoves(useStore.getState().doc, moves) });
-    if (alone) commitOperation();
-  }
-
-  /** Place the nodes the operation just ended moved, as one edit of the project (sent to be stored). */
-  function placeMoved(): void {
-    if (!collab) return;
-    const fresh = collab.project.board(collab.board);
-    const moves = new Map(
-      [...moved].filter(([id, at]) => {
-        const n = fresh?.nodes.find((x) => x.id === id);
-        return !!n && (n.x !== at.x || n.y !== at.y);
-      }),
-    );
-    moved.clear();
-    if (moves.size) collab.project.place(collab.board, moves);
-    else showCollabBoard();
-  }
-
-  /** Whether the shared board may be left: all of its edits stored, or the user letting go of the rest. */
-  async function mayLeaveCollab(): Promise<boolean> {
-    const pending = collab?.project.status().pending ?? 0;
-    return !pending || ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
+    target = sharedTarget(join.project, project, {
+      get: useStore.getState,
+      set,
+      say,
+      checkpoint,
+      commitOperation,
+      operating: () => !!operation,
+      opened: () => {
+        showAddress(useStore.getState().doc.id);
+        frame(useStore.getState().fit);
+      },
+    });
+    target.open(board);
+    return true;
   }
 
   /** Bring a part of the board to the middle of the view, zooming in if it would be too small to read. */
@@ -1003,7 +1032,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   async function write(b: Backend, doc: Doc, current: () => boolean): Promise<void> {
-    if (!current() || collab?.board === doc.id) return;
+    if (!current()) return;
     // A write already sent may finish after its board is closed; its result belongs to that board.
     const here = () => current() && useStore.getState().doc.id === doc.id;
     // Once the board is in conflict, only the user's choice writes it (a save queued before goes nowhere).
@@ -1032,20 +1061,15 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   /** ⌘S, or "もう一度" after a failed write: what is pending is written now (it is otherwise written by itself). */
-  async function saveNow(): Promise<void> {
-    if (collab) {
-      commitOperation();
-      collab.project.retry();
-      if (!collab.project.status().pending) say('共同編集先に保存済みです（変更は自動で保存されます）');
-      return;
-    }
+  const saveNow = (): Promise<void> => target.saveNow();
+  async function saveLocal(): Promise<void> {
     const current = scope();
     clearTimeout(retryTimer);
     retries = 0;
     const s = useStore.getState();
     const pending = s.doc !== stored;
     if (s.saving === 'error' && s.ready && !s.viewing && pending) await persist(s.doc).catch(() => {});
-    else await flush();
+    else await flushLocal();
     if (current() && useStore.getState().saving === 'saved') say(pending ? '保存しました' : '保存済みです（変更は自動で保存されます）');
   }
 
@@ -1058,11 +1082,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   /** Write any pending change now (before switching boards or leaving the page); whether it is all written. */
-  async function flush(): Promise<boolean> {
-    if (collab) {
-      commitOperation();
-      return !collab.project.status().pending;
-    }
+  async function flushLocal(): Promise<boolean> {
     const current = scope();
     clearTimeout(timer);
     if (keeping) await keeping.catch(() => {});
@@ -1089,11 +1109,14 @@ export function createEditSession(options: { page?: boolean } = {}) {
   const boardLoading = (): string | undefined => loading?.id;
 
   /** Leave the board on screen: its state kept in the history, its changes written (or let go). */
-  async function leave(b: Backend): Promise<boolean> {
-    const current = scope();
+  function leave(): Promise<boolean> {
     commitOperation();
-    if (collab) return mayLeaveCollab();
-    await quietly(() => settle(b));
+    return target.leave();
+  }
+  async function leaveLocal(): Promise<boolean> {
+    const b = backend;
+    const current = scope();
+    if (b) await quietly(() => settle(b));
     return current() && mayLeave();
   }
 
@@ -1110,13 +1133,13 @@ export function createEditSession(options: { page?: boolean } = {}) {
     const current = scope();
     const superseded = () => !current() || loading !== request;
     try {
-      const left = await leave(b);
+      const left = await leave();
       if (superseded()) return 'superseded';
       if (!left) return 'stayed';
       const doc = await tryLoad(b, id);
       if (superseded()) return 'superseded';
       if (!doc) return 'unreadable';
-      keepSteps(was);
+      target.keepSteps(was);
       show(doc);
       return 'shown';
     } finally {
@@ -1140,7 +1163,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
    */
   async function mayLeave(): Promise<boolean> {
     const current = scope();
-    if (await flush()) return true;
+    if (await flushLocal()) return true;
     if (!current()) return false;
     const saving = useStore.getState().saving;
     if (saving === 'conflict') {
@@ -1165,14 +1188,17 @@ export function createEditSession(options: { page?: boolean } = {}) {
     if (s.tool !== 'select' && s.tool !== 'pan' && !KINDS[s.doc.kind ?? 'system']?.tools.includes(s.tool)) set({ tool: 'select' });
   });
 
-  // History: the opened state is kept at the first edit, the edited one once editing pauses.
-  subscribe((s, prev) => {
-    if (!s.ready || s.viewing || s.collab || adopting || s.doc === prev.doc || s.doc.id !== prev.doc.id || !backend) return;
+  // What follows in the store from a change on screen: the board's target says (see Target.changed).
+  subscribe((s, prev) => target.changed(s, prev));
+
+  /** History: the opened state is kept at the first edit, the edited one once editing pauses. */
+  function keepHistory(s: State, prev: State): void {
+    if (!s.ready || s.viewing || adopting || s.doc === prev.doc || s.doc.id !== prev.doc.id || !backend) return;
     const b = backend;
     if (!baseKept) void quietly(() => keepBase(b));
     clearTimeout(settleTimer);
     settleTimer = window.setTimeout(() => void quietly(() => settle(b)), SETTLE_MS);
-  });
+  }
 
   /**
    * Sharing between the boards of a project (see shared.ts). The other boards are read when a board
@@ -1202,7 +1228,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   async function readProject(): Promise<void> {
     const b = backend;
     const current = scope();
-    if (!b || collab) return;
+    if (!b) return;
     const doc = currentBoard();
     const project = doc.meta.project?.trim();
     const ticket = ++projectRead;
@@ -1223,7 +1249,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   /** Take in what the other boards of the project have newer. The undo steps take it in too, so undoing never brings an old name back. */
   function pullIn(): void {
     const s = useStore.getState();
-    if (!s.ready || s.viewing || s.collab || s.editing || s.saving === 'conflict') return;
+    if (!s.ready || s.viewing || s.editing || s.saving === 'conflict') return;
     const entries = catalog([s.doc, ...s.others]);
     const next = pull(s.doc, entries);
     if (next === s.doc) return;
@@ -1232,19 +1258,19 @@ export function createEditSession(options: { page?: boolean } = {}) {
   }
 
   /** The shared key of a node of the project, given one (and written to its board) if it has none yet. */
-  async function shareKey(b: Backend, target: Entry): Promise<string | null> {
+  async function shareKey(b: Backend, entry: Entry): Promise<string | null> {
     const current = scope();
-    if (target.node.shared) return target.node.shared;
+    if (entry.node.shared) return entry.node.shared;
     const key = newKey();
     const s = useStore.getState();
-    if (target.board === s.doc.id) {
-      sharing(() => s.updateNode(target.node.id, { shared: key, sharedAt: Date.now() }, false));
+    if (entry.board === s.doc.id) {
+      sharing(() => s.updateNode(entry.node.id, { shared: key, sharedAt: Date.now() }, false));
       return key;
     }
     try {
-      const d = await b.load(target.board);
+      const d = await b.load(entry.board);
       if (!current()) return null;
-      const n = d?.nodes.find((x) => x.id === target.node.id);
+      const n = d?.nodes.find((x) => x.id === entry.node.id);
       if (!d || !n || n.type !== 'device') return null;
       let next = d;
       if (!n.shared) {
@@ -1257,8 +1283,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
     } catch (e) {
       if (!current()) return null;
       // The other board could not be written (changed elsewhere just now …): that is not this board's conflict.
-      console.warn('[keito] could not share with', target.boardTitle, e);
-      void tell(`「${target.boardTitle}」に書き込めませんでした。少し待ってからもう一度試してください。`);
+      console.warn('[keito] could not share with', entry.boardTitle, e);
+      void tell(`「${entry.boardTitle}」に書き込めませんでした。少し待ってからもう一度試してください。`);
       return null;
     }
   }
@@ -1298,40 +1324,41 @@ export function createEditSession(options: { page?: boolean } = {}) {
     if (current() && useStore.getState().doc.id === doc.id) set({ others });
   }
 
-  // A shared thing edited here (by hand, undo, the text panel …) becomes the newest version of it.
-  subscribe((s, prev) => {
-    if (!s.ready || s.viewing || s.collab || adopting || sharingNow || s.doc === prev.doc || s.doc.id !== prev.doc.id) return;
+  /** A shared thing edited here (by hand, undo, the text panel …) becomes the newest version of it. */
+  function stampShared(s: State, prev: State): void {
+    if (!s.ready || s.viewing || adopting || sharingNow || s.doc === prev.doc || s.doc.id !== prev.doc.id) return;
     const next = stamp(prev.doc, s.doc, Date.now());
     if (next === s.doc) return;
     sharing(() => set({ doc: next }));
     schedulePush();
-  });
+  }
 
-  // The board moved to another project (or into one): its fellows are others now.
   let projectTimer: number | undefined;
-  subscribe((s, prev) => {
-    if (s.doc.id !== prev.doc.id || s.viewing || s.collab || (s.doc.meta.project ?? '') === (prev.doc.meta.project ?? '')) return;
+  /** The board moved to another project (or into one): its fellows are others now. */
+  function followProject(s: State, prev: State): void {
+    if (s.doc.id !== prev.doc.id || s.viewing || (s.doc.meta.project ?? '') === (prev.doc.meta.project ?? '')) return;
     projectRead++;
     clearTimeout(projectTimer);
     projectTimer = window.setTimeout(() => void readProject(), 600);
-  });
+  }
 
-  // Autosave shortly after every change.
-  subscribe((s, prev) => {
-    if (!s.ready || s.viewing || s.collab || s.doc === prev.doc || s.doc === stored || s.saving === 'conflict' || s.saving === 'gone') return;
+  /** Autosave shortly after every change. */
+  function autosave(s: State, prev: State): void {
+    if (!s.ready || s.viewing || s.doc === prev.doc || s.doc === stored || s.saving === 'conflict' || s.saving === 'gone') return;
     clearTimeout(timer);
     if (s.saving !== 'saving') set({ saving: 'saving' });
     timer = window.setTimeout(() => void persist(useStore.getState().doc), 500);
-  });
+  }
 
   /** Store a picture for the current board; returns the `src` an image node should keep. */
-  async function storeImage(dataUrl: string): Promise<string> {
+  const storeImage = (dataUrl: string): Promise<string> => target.keepImage(dataUrl);
+  async function keepImageLocal(dataUrl: string): Promise<string> {
     const b = backend;
     const current = scope();
     const id = useStore.getState().doc.id;
-    if (!b || !b.assets || collab) return dataUrl;
+    if (!b || !b.assets) return dataUrl;
     // The board's folder must exist before a picture can go into it.
-    if (!useStore.getState().boards.some((b) => b.id === useStore.getState().doc.id)) await flush();
+    if (!useStore.getState().boards.some((b) => b.id === useStore.getState().doc.id)) await flushLocal();
     return current() ? b.putAsset(id, dataUrl) : dataUrl;
   }
 
@@ -1409,8 +1436,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
       set({ boards, mode: b.mode, ready: true, presets });
       listen(b);
       if (!current()) return;
-      if (opening) await openCollab(opening);
-      if (!current() || collab) return;
+      const shared = !!opening && (await openCollab(opening));
+      if (!current() || shared) return;
       show(doc);
     } catch (e) {
       if (!current()) return;
@@ -1426,14 +1453,11 @@ export function createEditSession(options: { page?: boolean } = {}) {
     if (id && useStore.getState().ready) useStore.getState().openBoard(id);
   });
 
-  /** Whether two copies of a board say the same, whatever version number each was written at. */
-  const sameBoard = (a: Doc | null, b: Doc | null): boolean => !!a && !!b && JSON.stringify({ ...a, serial: undefined }) === JSON.stringify({ ...b, serial: undefined });
-
   /** Take in the board as another writer left it, if nothing here is waiting to be saved. */
   async function pickUp(b: Backend): Promise<void> {
     const current = scope();
     const s = useStore.getState();
-    if (!s.ready || s.viewing || s.collab) return;
+    if (!s.ready || s.viewing) return;
     // Unsaved edits here (or text being typed) and a change on disk: the user decides which stays.
     if (s.editing || s.doc !== stored) return void enterConflict('conflict');
     const fresh = await b.load(s.doc.id);
@@ -1459,7 +1483,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
   onWindow('focus', () => {
     const s = useStore.getState();
     // Coming back with nothing unsaved: just look. A conflict is only claimed when something changed.
-    if (s.ready && !s.viewing && !s.editing && s.doc === stored) void run(pickUp);
+    if (s.ready && !s.viewing && !s.editing && s.doc === stored) target.pickUp();
     // Other boards may have changed too (another tab, browser storage has no events): new ones,
     // other titles or projects for the tabs, and the project's boards themselves.
     if (s.ready && !s.viewing)
@@ -1467,7 +1491,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
         const boards = await b.list();
         if (!active()) return;
         set({ boards });
-        if (current()) await readProject();
+        if (current()) await target.readProject();
       });
   });
 
@@ -1480,7 +1504,7 @@ export function createEditSession(options: { page?: boolean } = {}) {
       const current = scope();
       const s = useStore.getState();
       if (news.id === s.doc.id) {
-        if (b.serialOf?.(news.id) !== news.serial) void run(pickUp);
+        if (b.serialOf?.(news.id) !== news.serial) target.pickUp();
       } else
         void b.list().then((boards) => {
           if (!active()) return;
@@ -1489,47 +1513,50 @@ export function createEditSession(options: { page?: boolean } = {}) {
           // A board of this project changed (or joined it): what is shared may have changed with it.
           const project = currentBoard().meta.project?.trim();
           const info = boards.find((x) => x.id === news.id);
-          if (project && (info?.project?.trim() === project || useStore.getState().others.some((d) => d.id === news.id))) void readProject();
+          if (project && (info?.project?.trim() === project || useStore.getState().others.some((d) => d.id === news.id))) void target.readProject();
         }, () => {});
     });
   }
 
   const unsaved = (): Doc | null => {
     const { doc, ready, viewing } = useStore.getState();
-    return ready && !viewing && !collab && doc !== stored ? doc : null;
+    return ready && !viewing && doc !== stored ? doc : null;
   };
 
   /**
    * Write what is unsaved now, before the app is closed: whether it all went (the desktop app waits
    * for this before letting its window go).
    */
-  const flushBeforeClose = (): Promise<boolean> => flush();
+  const flushBeforeClose = (): Promise<boolean> => target.flush();
 
-  // Closing within the autosave delay: what the store can take as the page goes is written then
-  // (see pagehide); a board it cannot, or changes that cannot be written at all (changed or deleted
-  // elsewhere, a failed write), make the browser ask before they are lost.
   onWindow('beforeunload', (e) => {
-    if (collab?.project.status().pending) {
-      e.preventDefault();
-      e.returnValue = '';
-      return;
-    }
-    const doc = unsaved();
-    if (!doc || !backend) return;
-    const stuck = ['conflict', 'gone', 'error'].includes(useStore.getState().saving);
-    // A write still under way: the one sent on leaving would be made on the version before it and be
-    // refused, the last edits lost. The page asks, and finishes writing meanwhile.
-    if (!stuck && !inFlight && backend.fitsExitSave(doc)) return;
-    if (!stuck) void flush();
+    if (!target.closing()) return;
     e.preventDefault();
     e.returnValue = '';
   });
+  onWindow('pagehide', () => target.gone());
 
-  onWindow('pagehide', () => {
+  /**
+   * Closing within the autosave delay: what the store can take as the page goes is written then (see
+   * exitLocal); a board it cannot, or changes that cannot be written at all (changed or deleted
+   * elsewhere, a failed write), make the browser ask before they are lost.
+   */
+  function closingLocal(): boolean {
+    const doc = unsaved();
+    if (!doc || !backend) return false;
+    const stuck = ['conflict', 'gone', 'error'].includes(useStore.getState().saving);
+    // A write still under way: the one sent on leaving would be made on the version before it and be
+    // refused, the last edits lost. The page asks, and finishes writing meanwhile.
+    if (!stuck && !inFlight && backend.fitsExitSave(doc)) return false;
+    if (!stuck) void flushLocal();
+    return true;
+  }
+
+  function exitLocal(): void {
     const doc = unsaved();
     if (!doc || !backend || ['conflict', 'gone'].includes(useStore.getState().saving)) return;
     backend.exitSave(doc);
-  });
+  }
 
   /** What was copied, and from which board (and project). */
   let clipboard: { nodes: Node[]; edges: Edge[]; board: string; project: string } | null = null;
@@ -1706,7 +1733,8 @@ export function createEditSession(options: { page?: boolean } = {}) {
     unwatch?.();
     cleanups.splice(0).forEach((stop) => stop());
     [timer, settleTimer, retryTimer, noticeTimer, pushTimer, projectTimer].forEach(clearTimeout);
-    closeCollab();
+    target.close();
+    target = local;
     backend = null;
     clipboard = null;
     kept.clear();
@@ -1714,31 +1742,6 @@ export function createEditSession(options: { page?: boolean } = {}) {
 
   return { useStore, boot, openCollab, dispose, onOperation, boardLoading, saveNow, flushBeforeClose, deletedBoards, restoreBoard, loadState, currentBoard, showRect, reveal, centerOn, say, loadBoards, storeImage, copySelection, duplicateInPlace, duplicateSelection, pasteClipboard, restack, align };
 }
-
-/** Whether two objects hold the very same values (by reference) under every key but `skip`. */
-function sameExcept(a: object, b: object, skip: readonly string[]): boolean {
-  const x = a as Record<string, unknown>;
-  const y = b as Record<string, unknown>;
-  return [...Object.keys(x), ...Object.keys(y)].every((k) => skip.includes(k) || x[k] === y[k]);
-}
-
-/**
- * The nodes `to` puts elsewhere than `from`, or null when `to` changes anything but where nodes are.
- * An edit makes new objects only for what it changes, so all else is compared by reference.
- */
-function movesBetween(from: Doc, to: Doc): Map<string, Pt> | null {
-  if (to.nodes.length !== from.nodes.length || !sameExcept(from, to, ['nodes'])) return null;
-  const moves = new Map<string, Pt>();
-  for (const [i, n] of to.nodes.entries()) {
-    const was = from.nodes[i];
-    if (n === was) continue;
-    if (!sameExcept(was, n, ['x', 'y'])) return null;
-    if (n.x !== was.x || n.y !== was.y) moves.set(n.id, { x: n.x, y: n.y });
-  }
-  return moves;
-}
-
-const withMoves = (doc: Doc, moves: ReadonlyMap<string, Pt>): Doc => ({ ...doc, nodes: doc.nodes.map((n) => (moves.has(n.id) ? { ...n, ...moves.get(n.id)! } : n)) });
 
 /** The page's editor. */
 export const defaultSession = createEditSession({ page: true });

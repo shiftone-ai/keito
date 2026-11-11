@@ -41,7 +41,7 @@ export function tabPlace(e: KeyboardEvent): number | undefined {
  */
 export function nextTab(step: 1 | -1): string | undefined {
   const { doc, boards, collab } = useStore.getState();
-  return boardBeside(doc, boards, step, boardLoading(), !!collab);
+  return boardBeside(doc, boards, step, boardLoading(), collab?.boards);
 }
 
 /**
@@ -55,7 +55,7 @@ function tabFinder(e: KeyboardEvent): (() => string | undefined) | undefined {
   if (place === undefined) return undefined;
   return () => {
     const { doc, boards, collab } = useStore.getState();
-    return boardAt(doc, boards, place, !!collab);
+    return boardAt(doc, boards, place, collab?.boards);
   };
 }
 

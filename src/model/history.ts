@@ -16,6 +16,15 @@ const DAILY_DAYS = 30;
 /** The drawing alone, as compared and kept: no history list, no write counter. */
 export const drawingOf = (doc: Doc): Doc => ({ ...doc, revisions: undefined, serial: undefined });
 
+/** Whether two copies of a board say the same, whatever version number each was written at. */
+export const sameBoard = (a: Doc | null, b: Doc | null): boolean => !!a && !!b && JSON.stringify({ ...a, serial: undefined }) === JSON.stringify({ ...b, serial: undefined });
+
+/** The ids of a selection that a state of the board still has. */
+export function stillIn(doc: Doc, ids: string[]): string[] {
+  const here = new Set([...doc.nodes.map((n) => n.id), ...doc.edges.map((e) => e.id)]);
+  return ids.filter((id) => here.has(id));
+}
+
 /** A short fingerprint of a drawing, to tell whether two states are the same. */
 export function fingerprint(doc: Doc): string {
   const s = JSON.stringify(drawingOf(doc));
