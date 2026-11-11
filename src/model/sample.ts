@@ -1,6 +1,6 @@
 import { fromYaml } from './dsl';
 import { docBounds } from './geometry';
-import { randomId } from './presets';
+import { randomId } from './ids';
 import { catalog, pull } from './shared';
 import { placeLabels } from './labels';
 import { fitLegends } from './legend';

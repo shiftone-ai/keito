@@ -1,6 +1,6 @@
 import { ProjectMenu } from './ProjectMenu';
 import { fromYaml } from '../model/dsl';
-import { randomId } from '../model/presets';
+import { randomId } from '../model/ids';
 import { emptyDoc, saveNow, useStore } from '../model/store';
 import { tidy } from '../model/tidy';
 import { kindOf } from '../model/kinds';

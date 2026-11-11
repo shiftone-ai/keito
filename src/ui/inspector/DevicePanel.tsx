@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { safeUrl } from '../../model/url';
 import { colourKey, ipIssues, quantityOf, unitsOf } from '../../model/lists';
-import { freshId } from '../../model/presets';
+import { freshId } from '../../model/ids';
 import { kindOf } from '../../model/kinds';
 import { linkClick } from '../../platform/io';
 import { say, useStore } from '../../model/store';

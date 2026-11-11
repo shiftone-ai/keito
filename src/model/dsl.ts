@@ -1,7 +1,8 @@
 import { Document, isScalar, parse, visit } from 'yaml';
 import { docBounds, frameOf } from './geometry';
 import { autoLayout } from './layout';
-import { JUNCTION, freshId, makeEdge, parsePort, portBase, presetOf, presetPorts } from './presets';
+import { freshId } from './ids';
+import { JUNCTION, makeEdge, parsePort, portBase, presetOf, presetPorts } from './presets';
 import { VIDEO_STANDARDS, currentSignal, customSignals, isBuiltInSignal, isSignal, registerSignals } from './signals';
 import { cableKind } from './standards';
 import { upgradeOrder } from './lists';
