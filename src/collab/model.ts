@@ -8,16 +8,20 @@ import type { Doc, Pt, ShapeKind, ShapeNode } from '../model/types';
  * The form of a shared project's Y.Doc that this app reads and writes. A project of another form is
  * not opened (the server turns the connection away, see server/collab/server.ts).
  *
- * project: Y.Map { id, schema, title }
- * boards:  Y.Map<board id, Y.Map { id, title, kind, deleted?: true, nodes: Y.Map<node id, Y.Map> }>
- * node:    Y.Map { id, type, shape, color, text: Y.Text, pos: {x, y}, size: {w, h}, order }
+ * project:   Y.Map { id, schema, title }
+ * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map> }>
+ * node:      Y.Map { id, type, shape, color, text: Y.Text, pos: {x, y}, size: {w, h}, order }
+ * deletions: Y.Map<mark, board id>
  *
  * A node's position and size are each one value: two editors moving it at once end with one of
  * their positions, never the x of one and the y of the other.
  *
- * A board is never taken out of `boards`: deleting one marks it `deleted`, and only restoring it
- * takes the mark off. An edit made on the board by someone who had not yet heard of the delete
- * changes what the board holds, not the mark, so it does not bring the board back.
+ * A board is never taken out of `boards`: deleting one adds a mark of its own to `deletions`, and
+ * the board is deleted while any mark names it. Restoring it takes off the marks the restorer has
+ * seen, so a delete made at the same time by someone else keeps it deleted: one key for every delete
+ * would keep only one of two made at once, and a restore would then bring the board back or not by
+ * the editors' client ids. An edit made on the board by someone who had not yet heard of the delete
+ * changes what the board holds, not the marks, so it does not bring the board back either.
  */
 export const SCHEMA = 1;
 
@@ -36,17 +40,31 @@ export interface ProjectSeed {
 
 const META = 'project';
 const BOARDS = 'boards';
+const DELETIONS = 'deletions';
 const SHAPES: ShapeKind[] = ['rect', 'round', 'diamond', 'ellipse', 'cloud'];
 
 type YNode = Y.Map<unknown>;
 type YBoard = Y.Map<unknown>;
+
+/** An id that stays unique across clients without a secure context (randomUUID needs one; a LAN address is not). */
+export function uniqueId(): string {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
 
 /** A board of the project, deleted or not; null for an id the project never had. */
 function yBoard(ydoc: Y.Doc, id: string): YBoard | null {
   const board = ydoc.getMap<unknown>(BOARDS).get(id);
   return board instanceof Y.Map ? board : null;
 }
-const isDeleted = (board: YBoard): boolean => board.get('deleted') === true;
+const deletions = (ydoc: Y.Doc): Y.Map<unknown> => ydoc.getMap<unknown>(DELETIONS);
+/** The ids of the deleted boards. */
+function deletedIds(ydoc: Y.Doc): Set<string> {
+  const out = new Set<string>();
+  deletions(ydoc).forEach((board) => typeof board === 'string' && out.add(board));
+  return out;
+}
+const isDeleted = (ydoc: Y.Doc, id: string): boolean => deletedIds(ydoc).has(id);
 
 /** A new board, holding no nodes yet, to be put in `boards`. */
 function newBoard(board: { id: string; title: string; kind: BoardKind }): YBoard {
@@ -91,20 +109,21 @@ const pair = (v: unknown, a: 'x' | 'w', b: 'y' | 'h'): [number, number] | null =
 };
 const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/** The project's boards that `which` takes, in a fixed order (by title, then id) so every client lists them alike. */
-function listBoards(ydoc: Y.Doc, which: (board: YBoard) => boolean): SharedBoardInfo[] {
+/** The project's boards, deleted ones or the others, in a fixed order (by title, then id) so every client lists them alike. */
+function listBoards(ydoc: Y.Doc, deleted: boolean): SharedBoardInfo[] {
+  const gone = deletedIds(ydoc);
   const out: SharedBoardInfo[] = [];
   ydoc.getMap<unknown>(BOARDS).forEach((board, id) => {
-    if (board instanceof Y.Map && which(board)) out.push({ id, title: str(board.get('title')), kind: boardKind(board.get('kind')) });
+    if (board instanceof Y.Map && gone.has(id) === deleted) out.push({ id, title: str(board.get('title')), kind: boardKind(board.get('kind')) });
   });
   return out.sort((a, b) => a.title.localeCompare(b.title, 'ja') || byId(a.id, b.id));
 }
 
 /** The project's boards, the deleted ones left out. */
-export const boardList = (ydoc: Y.Doc): SharedBoardInfo[] => listBoards(ydoc, (board) => !isDeleted(board));
+export const boardList = (ydoc: Y.Doc): SharedBoardInfo[] => listBoards(ydoc, false);
 
 /** The project's deleted boards, which can be restored. */
-export const deletedBoardList = (ydoc: Y.Doc): SharedBoardInfo[] => listBoards(ydoc, isDeleted);
+export const deletedBoardList = (ydoc: Y.Doc): SharedBoardInfo[] => listBoards(ydoc, true);
 
 /** The project's name. */
 export const projectTitle = (ydoc: Y.Doc): string => str(ydoc.getMap<unknown>(META).get('title'));
@@ -135,7 +154,7 @@ function shapeOf(id: string, node: YNode): ShapeNode | null {
  */
 export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
   const board = yBoard(ydoc, boardId);
-  if (!board || isDeleted(board)) return null;
+  if (!board || isDeleted(ydoc, boardId)) return null;
   const nodes = board.get('nodes');
   const listed: { order: number; node: ShapeNode }[] = [];
   if (nodes instanceof Y.Map)
@@ -178,22 +197,21 @@ export function addBoard(ydoc: Y.Doc, board: { id: string; title: string; kind: 
 /** Rename a board of the project; a deleted board is left as it is. */
 export function renameBoard(ydoc: Y.Doc, id: string, title: string, origin: unknown): void {
   const board = yBoard(ydoc, id);
-  if (board && !isDeleted(board) && str(board.get('title')) !== title) ydoc.transact(() => board.set('title', title), origin);
+  if (board && !isDeleted(ydoc, id) && str(board.get('title')) !== title) ydoc.transact(() => board.set('title', title), origin);
 }
 
 /** Mark a board deleted. What it holds is kept, for `restoreBoard`. */
 export function deleteBoard(ydoc: Y.Doc, id: string, origin: unknown): void {
-  const board = yBoard(ydoc, id);
-  if (board && !isDeleted(board)) ydoc.transact(() => board.set('deleted', true), origin);
+  if (yBoard(ydoc, id) && !isDeleted(ydoc, id)) ydoc.transact(() => deletions(ydoc).set(uniqueId(), id), origin);
 }
 
 /**
- * Take the delete mark off a board. A delete made at the same time, by someone who had not seen this,
- * is not undone: the board stays deleted.
+ * Take the delete marks seen here off a board. A delete made at the same time, by someone who had
+ * not seen this, is not undone: the board stays deleted.
  */
 export function restoreBoard(ydoc: Y.Doc, id: string, origin: unknown): void {
-  const board = yBoard(ydoc, id);
-  if (board && isDeleted(board)) ydoc.transact(() => board.delete('deleted'), origin);
+  const marks = [...deletions(ydoc).entries()].filter(([, board]) => board === id).map(([mark]) => mark);
+  if (marks.length) ydoc.transact(() => marks.forEach((mark) => deletions(ydoc).delete(mark)), origin);
 }
 
 /** Rename the project. Its id, and so where it is shared, stays the same. */

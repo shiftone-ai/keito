@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { openStore } from '../server/collab/store';
 import { type SharedProject, joinProject } from '../src/collab/client';
-import { type ProjectSeed, SCHEMA, boardList } from '../src/collab/model';
+import { type ProjectSeed, SCHEMA, boardList, deleteBoard, restoreBoard, seedProject } from '../src/collab/model';
 import { readAnswer, writeCommit, writeCredential } from '../src/collab/protocol';
 import { type RunningServer, seedData, startServer, until } from './collab';
 
@@ -151,5 +151,29 @@ describe("a shared project's boards", () => {
     joined.push(stranger);
     await expect(stranger.ready).rejects.toThrow(/参加の権限がないか/);
     expect(stranger.status().refusal).toBe('no-access');
+  });
+});
+
+describe('a board deleted by two editors at once', () => {
+  // Yjs settles two values written to one key by the writers' client ids: both orders are tried.
+  it.each([
+    [1, 2],
+    [2, 1],
+  ])('stays deleted for everyone when a third editor restores it having seen one delete (client ids %i and %i)', (first, second) => {
+    const start = new Y.Doc();
+    seedProject(start, { id: 'p', title: '案件', board: { id: 'b', title: '配置' }, shape: { id: 's', text: '', x: 0, y: 0, w: 10, h: 10 } });
+    const editors = [first, second, 3].map((clientID) => {
+      const ydoc = new Y.Doc();
+      ydoc.clientID = clientID;
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(start));
+      return ydoc;
+    });
+    const [a, b, c] = editors;
+    deleteBoard(a, 'b', null);
+    deleteBoard(b, 'b', null);
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(a));
+    restoreBoard(c, 'b', null);
+    for (const to of editors) for (const from of editors) Y.applyUpdate(to, Y.encodeStateAsUpdate(from));
+    expect(editors.map(boardList)).toEqual([[], [], []]);
   });
 });

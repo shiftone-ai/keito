@@ -2,7 +2,7 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import type { BoardKind } from '../model/kinds';
 import type { Doc, Pt } from '../model/types';
-import { SCHEMA, type SharedBoardInfo, addBoard, boardDoc, boardList, deleteBoard, deletedBoardList, placeNodes, projectTitle, renameBoard, renameProject, restoreBoard } from './model';
+import { SCHEMA, type SharedBoardInfo, addBoard, boardDoc, boardList, deleteBoard, deletedBoardList, placeNodes, projectTitle, renameBoard, renameProject, restoreBoard, uniqueId } from './model';
 import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
 
 /** Where a shared project is, and the credential that lets this client in. */
@@ -42,12 +42,6 @@ const refusalOf = (reason: string): LinkRefusal => (Object.hasOwn(REFUSALS, reas
 
 /** A Yjs update failing to store is tried again after these waits, the last one repeated. */
 const RETRY_MS = [2_000, 5_000, 10_000, 30_000];
-
-/** An id (of an op, or a board) that stays unique without a secure context (randomUUID needs one; a LAN address is not). */
-function uniqueId(): string {
-  const b = crypto.getRandomValues(new Uint8Array(16));
-  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
-}
 
 /**
  * A connection to one shared project. Edits are made through it (`place`) and kept until the server
