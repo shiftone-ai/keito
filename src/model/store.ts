@@ -2,6 +2,7 @@ import type { ShareStatus, SharedJoin, Steps } from '../collab/client';
 import type { SharedBoardInfo } from '../collab/boards';
 import type { DeviceStore } from '../collab/kept';
 import type { EditKind } from '../collab/scope';
+import type { BoardManagement } from '../collab/tabs';
 import { sharedTarget } from '../collab/target';
 import { localEdits } from './edits';
 import { fitLegends } from './legend';
@@ -74,12 +75,16 @@ function showInUrl(id: string): void {
 
 /**
  * The shared project whose board is on screen (see openCollab), how this page stands with its
- * server, the project's boards (its tabs), and whether this page's own edits of the board on screen
- * can be undone or redone.
+ * server, the project's boards (its tabs; none, and no board on screen, once all are deleted), and
+ * whether this page's own edits of the board on screen can be undone or redone.
  */
 export interface CollabState extends ShareStatus, Steps {
   project: string;
   boards: SharedBoardInfo[];
+  /** The project's deleted boards, which `manage.restore` brings back. */
+  deleted: SharedBoardInfo[];
+  /** Adding, renaming and restoring the project's boards, and renaming the project, for everyone in it. */
+  manage: BoardManagement;
   /** Edits the server has not stored are not kept on this device either: they are in this page alone. */
   unkept: boolean;
   /** What the board takes (see Target.takes), without telling the user anything. */
@@ -826,14 +831,15 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
   /**
    * Open a shared project's board in place of the board on screen, once the server has let this page
    * in and sent the project; whether it was. Turned away (no grant for the project, another schema)
-   * or not reached, the board on screen stays and the user is told why.
+   * or not reached, the board on screen stays and the user is told why. A project with no board
+   * opens empty (see sharedTarget).
    */
   async function openCollab(join: SharedJoin): Promise<boolean> {
     const b = backend;
     const current = scope();
     if (!b) return false;
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
-    const { joinProject } = await import('../collab/client');
+    const { joinProject, refusalText } = await import('../collab/client');
     if (!current()) return false;
     const project = joinProject(join, options.device === undefined ? browserDevice : options.device);
     try {
@@ -843,11 +849,8 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       if (current()) void tell(e instanceof Error ? e.message : String(e));
       return false;
     }
-    const board = project.boards()[0]?.id;
-    const doc = board ? project.board(board) : null;
-    if (!current() || !board || !doc) {
+    if (!current()) {
       project.close();
-      if (current()) void tell('共有案件にボードがありません');
       return false;
     }
     const was = useStore.getState();
@@ -857,8 +860,8 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       return false;
     }
     if (save.stored()) target.edits.keepSteps(was);
-    resetSession(doc, doc);
-    target = sharedTarget(join.project, project, {
+    resetSession(was.doc, was.doc);
+    const shared = sharedTarget(join.project, project, {
       get: useStore.getState,
       set,
       say,
@@ -866,13 +869,35 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       checkpoint,
       commitOperation,
       operating: () => !!operation,
-      opened: () => {
+      opened: (view) => {
         showAddress(useStore.getState().doc.id);
-        frame(useStore.getState().fit);
+        if (view) set({ view });
+        else frame(useStore.getState().fit);
       },
+      refused: (refusal) => leaveShared(refusalText(refusal), project.status().pending),
     });
-    target.boards.open(board);
+    target = shared;
+    shared.start();
     return true;
+  }
+
+  /**
+   * Leave a shared project that turned this page away while it was open (deleted …) for a board of
+   * this machine: the one last shown here, else the first. The user is told why, and of the edits
+   * the project will never store.
+   */
+  function leaveShared(why: string, unstored: number): void {
+    const { boards } = useStore.getState();
+    const last = localStorage.getItem(CURRENT);
+    const back = boards.find((b) => b.id === last)?.id ?? boards[0]?.id;
+    if (back) openLocal(back);
+    else
+      void run(async () => {
+        const doc = emptyDoc();
+        show(doc);
+        await save.persist(doc);
+      });
+    void tell(`${why}。この端末のボードに戻ります。${unstored ? `\n共同編集先に保存されていなかった変更 ${unstored} 件は、保存されません。` : ''}`);
   }
 
   /** Bring a part of the board to the middle of the view, zooming in if it would be too small to read. */

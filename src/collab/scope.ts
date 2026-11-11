@@ -1,3 +1,4 @@
+import type { BoardKind } from '../model/kinds';
 import type { Tool } from '../model/store';
 
 /**
@@ -48,10 +49,16 @@ export const WRITTEN_ONCE: Partial<Record<SharedType, readonly string[]>> = {
 export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'lines' | 'ports' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. A text box is nothing until text is typed into it. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'copying', 'restack', 'lines', 'ports', 'settings', 'images', 'links', 'tidy', 'comments', 'removing']);
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'copying', 'restack', 'lines', 'ports', 'settings', 'images', 'links', 'tidy', 'comments']);
 
 /** Whether a shared board takes an edit of this kind. */
 export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
+
+/** What a shared project with no board takes: looking round, nothing to draw on. */
+export const emptyTakes = (what: EditKind): boolean => what === 'select' || what === 'pan';
+
+/** The kinds of board a shared project is given: a sequence board's diagram is not shared yet. */
+export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free'];
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';

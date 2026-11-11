@@ -118,7 +118,7 @@ describe('a shared project kept on this device', () => {
     const device = memoryDevice();
     const a = await editor({ device: device.store });
     administer((store) => store.deleteProject(seed.id));
-    await until(() => a.s().collab?.refusal === 'deleted', 5_000, 'the delete to be heard');
+    await until(() => a.s().collab === null, 5_000, 'the delete to be heard');
     a.session.dispose();
     const down = server.url;
     await server.kill();
@@ -166,8 +166,15 @@ describe('a shared project kept on this device', () => {
     a.session.dispose();
     administer((store) => store.deleteProject(seed.id));
     server = await startServer(data, port);
+    const told = vi.spyOn(window, 'alert');
+    const asked = vi.spyOn(window, 'confirm');
     const b = await editor({ device: device.store });
-    await until(() => b.s().collab?.refusal === 'deleted', 10_000, 'the delete to be heard');
+    // Opened from the copy, then turned away: left as when turned away while open.
+    await until(() => b.s().collab === null, 10_000, 'the delete to be heard');
+    expect(b.s().doc.id).toBe('local');
+    // Not asked whether to leave: the copy turned away is not sent, and nothing else would keep the edit.
+    expect(asked).not.toHaveBeenCalled();
+    expect(told).toHaveBeenCalledWith(expect.stringMatching(/この共有案件は削除されています。この端末のボードに戻ります。\n.*変更 1 件は、保存されません/));
     b.session.dispose();
 
     administer((store) => store.restoreProject(seed.id));
