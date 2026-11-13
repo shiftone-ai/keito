@@ -711,7 +711,7 @@ export function Canvas() {
       if (d.kind === 'move' && d.dup) {
         // The copies take the originals' places in the drag (in the same undo step).
         const map = duplicateInPlace(s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id)));
-        // No copies made (a shared board takes none yet): moving the originals instead is not what was asked.
+        // No copies made (a board that takes none): moving the originals instead is not what was asked.
         if (!map.size) return onCancel();
         d.orig = new Map([...d.orig].map(([id, q]) => [map.get(id) ?? id, q]));
         d.routes = new Map([...d.routes].map(([id, r]) => [map.get(id) ?? id, r]));
