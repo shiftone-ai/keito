@@ -293,7 +293,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
      */
     typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
       const parts = editing() ? tracked(board) : null;
-      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, history: parts.history, joins, editing });
+      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => ydoc.transact(write, drawing), history: parts.history, joins, editing });
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {

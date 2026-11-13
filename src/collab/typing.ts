@@ -7,6 +7,8 @@ import { boardLines, boardNodes, liveBoard } from './boards';
 export interface TypingContext {
   /** The origin of each change typed: what `history` tracks as this page's own edits. */
   origin: unknown;
+  /** Make a change typed as one transaction under `origin`, as the page's other edits of the board are made. */
+  transact(write: () => void): void;
   /** The undo of the edits the typing is part of (a board's). */
   history: Y.UndoManager;
   /** The typing is part of the last step of `history`, else a step of its own. */
@@ -57,7 +59,7 @@ export function openText(text: Y.Text, context: TypingContext): TextSession {
       if (!open() || !delta.length) return;
       typing = true;
       try {
-        doc.transact(() => text.applyDelta(delta as never[]), origin);
+        context.transact(() => text.applyDelta(delta as never[]));
       } finally {
         typing = false;
       }
