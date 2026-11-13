@@ -224,8 +224,8 @@ test('a shared board turns away what it does not take yet, and a board of this m
   await expect(a.locator('.quickbar button[aria-label^="削除"]')).toHaveCount(1);
   for (const tip of ['文字を編集', '複製']) await expect(a.locator(`.quickbar button[aria-label^="${tip}"]`)).toHaveCount(0);
   await shape(a).click({ button: 'right' });
-  for (const label of ['コピー', '切り取り', '削除']) await expect(a.locator('.context-menu button', { hasText: label })).toBeEnabled();
-  for (const label of ['貼り付け', '複製', '最前面へ', '最背面へ']) await expect(a.locator('.context-menu button', { hasText: label })).toBeDisabled();
+  for (const label of ['コピー', '切り取り', '最前面へ', '最背面へ', '削除']) await expect(a.locator('.context-menu button', { hasText: label })).toBeEnabled();
+  for (const label of ['貼り付け', '複製']) await expect(a.locator('.context-menu button', { hasText: label })).toBeDisabled();
   await a.keyboard.press('Escape');
   await a.keyboard.press('ControlOrMeta+d');
   await expect(a.locator('.notice')).toHaveText(/共有中のボードでは/);

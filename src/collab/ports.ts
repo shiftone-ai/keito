@@ -10,7 +10,7 @@ import { type YMap, readInOrder, setEach, textOf, writeItems } from './entries';
  *
  * Each port is an entry of its own, so ports two people add to one device at once are both kept, and
  * its side and signal are keys of their own (see PORT_ATTRIBUTES in scope.ts). Its name is typed by
- * hand: a Y.Text.
+ * hand: a Y.Text. `order` is its place among the device's ports (see order.ts).
  */
 
 /** A device's ports, in their order. */

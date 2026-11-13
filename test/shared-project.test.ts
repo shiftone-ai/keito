@@ -207,7 +207,6 @@ describe('a shared project', () => {
     a.s().mutate((d) => ({ ...d, nodes: [...d.nodes, { id: 'img', type: 'image', x: 0, y: 0, w: 10, h: 10, text: '', src: 'data:,' }] }));
     a.s().select([seed.shape.id]);
     a.session.duplicateSelection();
-    a.session.restack('front');
     a.s().nameState('提出版');
     // A text box would be nothing there: no text is typed into it yet.
     for (const tool of ['sequence', 'text'] as const) a.s().setTool(tool);
