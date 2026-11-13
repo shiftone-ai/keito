@@ -160,11 +160,18 @@ test('two browsers keep a line on a port one moves down while the other pulls th
 
 /** The rows of the equipment list as the lists panel shows them. */
 const equipment = (page: Page) => page.locator('.lists tbody tr').allInnerTexts();
-/** Drag a row of the list on show by its grip to where the row `to` is. */
-async function dragRow(page: Page, from: number, to: number): Promise<void> {
+/** Drag a row of the list on show by its grip to where the row `to` is; `between` runs halfway, the button still held. */
+async function dragRow(page: Page, from: number, to: number, between?: () => Promise<void>): Promise<void> {
   const rows = page.locator('.lists tbody tr');
-  await drag(page, await middleOf(rows.nth(from).locator('td.grip')), await middleOf(rows.nth(to).locator('td.grip')));
+  await drag(page, await middleOf(rows.nth(from).locator('td.grip')), await middleOf(rows.nth(to).locator('td.grip')), between);
 }
+/** Open the equipment list in the lists panel. */
+async function openEquipment(page: Page): Promise<void> {
+  await page.locator('.topbar-end button', { hasText: '機材・ケーブル表' }).click();
+  await page.locator('.lists .tabs button', { hasText: '機材リスト' }).click();
+}
+/** The names of the devices in rows of the equipment list: after the grip, No, 区分 and カテゴリ. */
+const names = (rows: string[]) => rows.map((row) => row.split('\t')[4]);
 
 test('two browsers list the equipment in the order either drags its rows to, and in the list\'s own order once one puts it back, until undone', async ({ browser }) => {
   const a = await openLink(browser);
@@ -174,13 +181,8 @@ test('two browsers list the equipment in the order either drags its rows to, and
   await putDevice(a, 'プロジェクター', 250, 0);
   await putDevice(a, 'LEDウォール', 0, 200);
   await expect(device(b, 'LEDウォール')).toHaveCount(1);
-  for (const page of [a, b]) {
-    await page.locator('.topbar-end button', { hasText: '機材・ケーブル表' }).click();
-    await page.locator('.lists .tabs button', { hasText: '機材リスト' }).click();
-  }
+  for (const page of [a, b]) await openEquipment(page);
   const own = await alike(a, b, equipment);
-  // After the grip, No, 区分 and カテゴリ.
-  const names = (rows: string[]) => rows.map((row) => row.split('\t')[4]);
   expect(names(own)).toHaveLength(4);
 
   /** `rows` with the row `from` taken out and put back at `to`. */
@@ -202,7 +204,27 @@ test('two browsers list the equipment in the order either drags its rows to, and
   expect(await alike(a, b, equipment)).toEqual(byHand);
 
   const c = await openLink(browser);
-  await c.locator('.topbar-end button', { hasText: '機材・ケーブル表' }).click();
-  await c.locator('.lists .tabs button', { hasText: '機材リスト' }).click();
+  await openEquipment(c);
   expect(await equipment(c)).toEqual(byHand);
+});
+
+test('a row let go in one browser after the other browser has moved another row meanwhile goes beside the row it was let go at, the other move kept', async ({ browser }) => {
+  const a = await openLink(browser);
+  const b = await openLink(browser);
+  await a.getByRole('button', { name: '機材ライブラリ' }).click();
+  await putDevice(a, 'PC', -250, 0);
+  await putDevice(a, 'プロジェクター', 250, 0);
+  await putDevice(a, 'LEDウォール', 0, 200);
+  await expect(device(b, 'LEDウォール')).toHaveCount(1);
+  for (const page of [a, b]) await openEquipment(page);
+  // Three devices, then the total.
+  const [first, second, third, total] = names(await alike(a, b, equipment));
+
+  // One drags the first row down below the second; before letting go, the other moves the third row to the top.
+  await dragRow(a, 0, 1, async () => {
+    await dragRow(b, 2, 0);
+    await expect(b.locator('.save-state')).toHaveText('共同編集先に保存済み');
+    await expect.poll(async () => names(await equipment(a)).indexOf(third)).toBeLessThan(2);
+  });
+  expect(names(await alike(a, b, equipment))).toEqual([third, second, first, total]);
 });

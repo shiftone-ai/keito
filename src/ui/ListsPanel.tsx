@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { type CellEdit, TABLES, type Table, bands, clearOrder, editCell, editable, moveRow } from '../model/lists';
+import { type CellEdit, TABLES, type Table, bands, clearOrder, dragIn, editCell, editable, moveRow } from '../model/lists';
 import { kindOf } from '../model/kinds';
 import { allSignals, groupSignals } from '../model/signals';
 import { reveal, useStore } from '../model/store';
@@ -131,7 +131,12 @@ export function ListsPanel() {
       const swallow = (e: MouseEvent) => e.stopPropagation();
       window.addEventListener('click', swallow, { capture: true, once: true });
       setTimeout(() => window.removeEventListener('click', swallow, { capture: true }));
-      if (keep && to !== from) useStore.getState().setDoc(moveRow(useStore.getState().doc, t, from, to));
+      if (!keep || to === from) return;
+      // Not by `t`: on a shared board, another person may have moved rows while this one was dragged.
+      const doc = useStore.getState().doc;
+      const now = TABLES[keys[at]].make(doc);
+      const moved = dragIn(t, now, from, to);
+      if (moved) useStore.getState().setDoc(moveRow(doc, now, moved.from, moved.to));
     };
     const drop = (e: PointerEvent) => e.pointerId === ev.pointerId && finish(true);
     // Leaving the window (switching apps mid-drag) drops nothing.
