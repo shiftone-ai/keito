@@ -63,7 +63,7 @@ export const LINE_TEXTS = ['label', 'note'] as const;
 export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. A text box is nothing until text is typed into it. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'copying', 'restack', 'settings', 'images', 'links', 'tidy', 'comments']);
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'restack', 'settings', 'images', 'links', 'tidy', 'comments']);
 
 /** Whether a shared board takes an edit of this kind. */
 export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
@@ -76,5 +76,5 @@ export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free']
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
-export const SHARED_SO_FAR = '図形や機材を置く・動かす・色などを変える・消す操作と、線・ポートの追加・つなぎ替え・削除';
+export const SHARED_SO_FAR = '図形や機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、線・ポートの追加・つなぎ替え・削除';
 export const NOT_SHARED_YET = '名前やメモなどの文字の入力、並び順、ボードの設定';

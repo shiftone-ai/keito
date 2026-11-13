@@ -17,7 +17,7 @@ import { type BoardKind, KINDS, kindOf } from './kinds';
 import { SEQUENCE_SAMPLE } from './sequence';
 import { BOARD_ID, readBoard } from './load';
 import { docBounds, nodeRect, snap } from './geometry';
-import { allIds, freshId, randomId } from './ids';
+import { allIds, freshId, prefixOf, randomId } from './ids';
 import { makeNode } from './presets';
 import { sampleBoards } from './sample';
 import { registerSignals } from './signals';
@@ -1390,11 +1390,12 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
   }
 
   /**
-   * Copies of the given nodes, and the lines between them, right on top of them and selected: what
-   * an Alt-drag moves away, leaving the originals. The clipboard is left alone, and the caller keeps
-   * the undo step (the drag's). Says which copy is which: node and line ids, old → new.
+   * Copies of the given nodes, and the lines between them, `offset` down and right of them and
+   * selected; right on top, what an Alt-drag moves away, leaving the originals. The clipboard is left
+   * alone. `record` makes them an undo step of their own; else the caller keeps the step (the drag's).
+   * Says which copy is which: node and line ids, old → new.
    */
-  function duplicateInPlace(ids: string[]): Map<string, string> {
+  function duplicateInPlace(ids: string[], offset = 0, record = false): Map<string, string> {
     if (!takes('copying')) return new Map();
     const s = useStore.getState();
     const keep = new Set(ids);
@@ -1404,18 +1405,20 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     const nodes = s.doc.nodes
       .filter((n) => keep.has(n.id))
       .map((n) => {
-        const id = freshId(taken, n.id.replace(/\d+$/, '') || 'n');
+        const id = freshId(taken, prefixOf(n.id));
         map.set(n.id, id);
-        return { ...n, id, ...('shared' in n ? { shared: undefined, sharedAt: undefined } : {}) } as Node;
+        return { ...n, id, x: n.x + offset, y: n.y + offset, ...('shared' in n ? { shared: undefined, sharedAt: undefined } : {}) } as Node;
       });
     const edges = s.doc.edges
       .filter((e) => keep.has(e.from.node) && keep.has(e.to.node))
       .map((e) => {
         const id = freshId(taken, 'e');
         map.set(e.id, id);
-        return { ...e, id, from: { ...e.from, node: map.get(e.from.node)! }, to: { ...e.to, node: map.get(e.to.node)! } };
+        const from = { ...e.from, node: map.get(e.from.node)! };
+        const to = { ...e.to, node: map.get(e.to.node)! };
+        return { ...e, id, from, to, ...(e.route && { route: e.route.map((p) => ({ x: p.x + offset, y: p.y + offset })) }) };
       });
-    s.mutate((d) => ({ ...d, nodes: [...d.nodes, ...nodes], edges: [...d.edges, ...edges] }), false);
+    s.mutate((d) => ({ ...d, nodes: [...d.nodes, ...nodes], edges: [...d.edges, ...edges] }), record);
     s.select(nodes.map((n) => n.id));
     return map;
   }
@@ -1428,15 +1431,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
   function duplicateSelection(offset = 30): void {
     const s = useStore.getState();
     const ids = s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id));
-    if (!ids.length || !takes('copying')) return;
-    s.checkpoint();
-    const map = duplicateInPlace(ids);
-    const copies = new Set(map.values());
-    s.mutate((d) => ({
-      ...d,
-      nodes: d.nodes.map((n) => (copies.has(n.id) ? { ...n, x: n.x + offset, y: n.y + offset } : n)),
-      edges: d.edges.map((e) => (copies.has(e.id) && e.route ? { ...e, route: e.route.map((p) => ({ x: p.x + offset, y: p.y + offset })) } : e)),
-    }), false);
+    if (ids.length) duplicateInPlace(ids, offset, true);
   }
 
   /**
@@ -1451,15 +1446,21 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     const taken = allIds(s.doc);
     const map = new Map<string, string>();
     // Pasted onto another board of the project, a shared thing stays the same thing; a copy on its
-    // own board (or elsewhere) is another one: the second PC is not the first.
+    // own board (or elsewhere) is another one: the second PC is not the first. A board that holds no
+    // links to other boards (a shared project's, so far) would turn the whole paste away for one.
+    const links = target.edits.takes('links');
     const project = s.doc.meta.project?.trim() ?? '';
-    const same = clipboard.board !== s.doc.id && !!project && clipboard.project === project;
+    const same = links && clipboard.board !== s.doc.id && !!project && clipboard.project === project;
     const here = new Set(s.doc.nodes.map((n) => ('shared' in n ? n.shared : undefined)).filter(Boolean));
     const nodes = clipboard.nodes.map((n) => {
-      const id = freshId(taken, n.id.replace(/\d+$/, '') || 'n');
+      const id = freshId(taken, prefixOf(n.id));
       map.set(n.id, id);
       const keep = same && 'shared' in n && !!n.shared && !here.has(n.shared);
-      return { ...n, id, x: n.x + offset.x, y: n.y + offset.y, ...('shared' in n && !keep ? { shared: undefined, sharedAt: undefined } : {}) } as Node;
+      const unlinked = {
+        ...('shared' in n && !keep ? { shared: undefined, sharedAt: undefined } : {}),
+        ...('runsOn' in n && !links ? { runsOn: undefined } : {}),
+      };
+      return { ...n, id, x: n.x + offset.x, y: n.y + offset.y, ...unlinked } as Node;
     });
     const edges = clipboard.edges.map((e) => ({
       ...e,
@@ -1469,6 +1470,8 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       route: e.route?.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })),
     }));
     s.mutate((d) => ({ ...d, nodes: [...d.nodes, ...nodes], edges: [...d.edges, ...edges] }));
+    // Checked after, not before: only the board knows what it turns away (a picture onto a shared board …).
+    if (!useStore.getState().doc.nodes.some((n) => n.id === nodes[0].id)) return;
     s.select(nodes.map((n) => n.id));
     clipboard = { ...clipboard, nodes, edges };
   }
