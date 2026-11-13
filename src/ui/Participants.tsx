@@ -47,12 +47,20 @@ export function Participants({ collab }: { collab: CollabState }) {
   useEffect(() => {
     if (!open) return;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || composing(e)) return;
-      // Caught before the page's keys: those would let go of the selection as well.
+      if (composing(e)) return;
+      if (e.key === 'Escape') {
+        // Caught before the page's keys: those would let go of the selection as well.
+        e.stopPropagation();
+        e.preventDefault();
+        close();
+        pill.current?.focus();
+        return;
+      }
+      // Other shortcuts (⌘S …) and Tab still work, and keys in the menu go to it; any other key stays
+      // out of the board behind it (Delete would remove what is selected there).
+      if (e.metaKey || e.ctrlKey || e.key === 'Tab' || (e.target instanceof Element && e.target.closest('.participants-menu'))) return;
       e.stopPropagation();
       e.preventDefault();
-      close();
-      pill.current?.focus();
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
