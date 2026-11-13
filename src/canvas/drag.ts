@@ -1,5 +1,6 @@
 // What the canvas is in the middle of (a drag, its ghost, a planned connection) and the small helpers its parts share.
 import { type Dir } from '../model/geometry';
+import { stillIn } from '../model/history';
 import { useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect } from '../model/types';
 
@@ -62,6 +63,18 @@ export const st = useStore.getState;
  */
 export function endDrag(d: Drag | null): void {
   if (d && 'moved' in d && d.moved) st().commitOperation();
+}
+
+/**
+ * Escape, mid-drag: the drag is called off, as if never begun. What it changed is dropped, not
+ * undone, so what others did meanwhile on a shared board stays; `selected`, what was selected
+ * before it, is selected again as far as it is still there.
+ */
+export function callOff(d: Drag, selected: string[]): void {
+  if (d.kind === 'marquee') return st().select(d.base);
+  if (!('moved' in d) || !d.moved) return;
+  st().dropStep();
+  st().select(stillIn(st().doc, selected));
 }
 
 /**

@@ -19,7 +19,7 @@ import { openBoards } from '../ui/Boards';
 import { EmptyProject } from '../ui/SharedBoards';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
-import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, lostTarget, st } from './drag';
+import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, callOff, canConnect, endDrag, lostTarget, st } from './drag';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
 
@@ -260,6 +260,8 @@ export function Canvas() {
   const [busy, setBusy] = useState(false);
   const [space, setSpace] = useState(false);
   const drag = useRef<Drag | null>(null);
+  /** What was selected as the drag under way began, selected again if it is called off. */
+  const selectedAtStart = useRef<string[]>([]);
   /** The plan last shown, kept while the target stays the same so its routes are not worked out again. */
   const lastPlan = useRef<Plan | null>(null);
   const keepPlan = (plan: Plan | null): Plan | null => {
@@ -276,6 +278,7 @@ export function Canvas() {
   };
   const begin = (e: RPointerEvent, d: Drag) => {
     drag.current = d;
+    selectedAtStart.current = st().selection;
     gesture = true;
     setBusy(true);
     try {
@@ -786,32 +789,47 @@ export function Canvas() {
     s.updateNode(d.id, { x, y, w, h }, false);
   };
 
-  /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
-  const onCancel = () => {
-    endDrag(drag.current);
+  /** Let go of the gesture under way: the drag, and what it shows. */
+  const release = () => {
+    const d = drag.current;
     drag.current = null;
     gesture = false;
     lastPlan.current = null;
     setGhost(null);
     setGuides({});
     setBusy(false);
-  };
-
-  const onUp = (e: RPointerEvent) => {
-    const d = drag.current;
-    drag.current = null;
-    gesture = false;
-    setGhost(null);
-    lastPlan.current = null;
-    // The pointer was held by the canvas, so the box it left from never heard it go: its dots
+    // The pointer was held by the canvas, so the box a line left from never heard it go: its dots
     // would stay lit. They come back as soon as the pointer moves onto a box again.
     if (d?.kind === 'connect' || d?.kind === 'reconnect') {
       setHoverSide(null);
       setHover(null);
-      setHush(nodeAt(st().doc, world(e))?.id ?? null);
     }
-    setGuides({});
-    setBusy(false);
+  };
+
+  /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
+  const onCancel = () => {
+    endDrag(drag.current);
+    release();
+  };
+
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => {
+      const d = drag.current;
+      if (e.key !== 'Escape' || e.isComposing || !d) return;
+      // Caught before the page's keys: those would let go of the selection as well.
+      e.stopPropagation();
+      e.preventDefault();
+      release();
+      callOff(d, selectedAtStart.current);
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, []);
+
+  const onUp = (e: RPointerEvent) => {
+    const d = drag.current;
+    release();
+    if (d?.kind === 'connect' || d?.kind === 'reconnect') setHush(nodeAt(st().doc, world(e))?.id ?? null);
     // Checked here too, not only as the pointer moves: let go without moving after the take-off, it would make a line to what is gone.
     if (d && lostTarget(st().doc, d)) return endDrag(d);
     if (d?.kind !== 'segment') endDrag(d);
