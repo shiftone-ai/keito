@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import { Canvas, inGesture, insertImages, insertText, spawnFrom, zoomBy } from './canvas/Canvas';
+import { ScreenPictures } from './canvas/ScreenPictures';
 import { isCatcher, isField, onControl, overBoard } from './ui/keys';
 import { hasText } from './model/types';
 import { copyText, getSetting, setSetting } from './platform/io';
@@ -252,7 +253,9 @@ export function App() {
         <Toolbar />
         <div className="stage">
           <RevisionBanner />
-          <Canvas />
+          <ScreenPictures>
+            <Canvas />
+          </ScreenPictures>
           <SearchBar />
           <Notice />
           {docks.comments && <CommentsPanel />}

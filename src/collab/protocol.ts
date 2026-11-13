@@ -15,6 +15,9 @@
  *
  * Once it lets a client in, the server tells it what its invite lets it do (`access`), before it
  * answers the client's first sync: a viewer's commits are refused (`read-only`).
+ *
+ * The server tells the clients of a project of each picture it newly keeps for it (`picture`, see
+ * pictureRef.ts): one waiting for it fetches it then.
  */
 export interface Commit {
   type: 'commit';
@@ -110,4 +113,12 @@ export const writeCredential = (credential: Credential): string => JSON.stringif
 export function readCredential(text: string): Credential | null {
   const v = parse(text);
   return typeof v?.token === 'string' && typeof v.schema === 'number' ? { token: v.token, schema: v.schema } : null;
+}
+
+export const writeArrival = (name: string): string => JSON.stringify({ type: 'picture', name });
+
+/** The name of the picture a message from the server says it now keeps, or null for any other message. */
+export function readArrival(text: string): string | null {
+  const v = parse(text);
+  return v?.type === 'picture' && typeof v.name === 'string' ? v.name : null;
 }

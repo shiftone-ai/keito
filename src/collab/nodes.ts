@@ -4,6 +4,7 @@ import { COLOR_KEYS } from '../model/signals';
 import { FILL_STYLES, type Node, SHAPE_KINDS } from '../model/types';
 import type { BoardEdit, Change } from './edits';
 import { type Check, type YMap, isBoolean, isNumber, isString, moveEntries, oneOf, orderRange, textOf } from './entries';
+import { isSharedSrc } from './pictureRef';
 import { putPorts, readPorts, writePorts } from './ports';
 import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
 
@@ -13,6 +14,7 @@ import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
  * node:   Y.Map { id, type, order, pos: {x, y}, size: {w, h}, text: Y.Text, …its attributes, …its places in lists }
  * device: … note: Y.Text, ports (see ports.ts)
  * legend: … names: Y.Map<row, Y.Text>, hidden: Y.Map<row, true>
+ * image:  … src: the project's picture (see pictureRef.ts), caption: Y.Text
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
  * attributes of one node keep all their changes. What is typed by hand is a Y.Text. `order` is its
@@ -43,7 +45,16 @@ const CHECKS = {
   vendor: isString,
   ip: isString,
   host: isString,
+  src: isSharedSrc,
+  under: isBoolean,
+  opacity: isNumber,
+  captionAt: oneOf(['top', 'bottom']),
 } satisfies Record<Exclude<Attribute, 'hidden'>, Check>;
+
+/** What a node of each kind cannot be shown without: one lacking it is left out. */
+const REQUIRED: Partial<Record<SharedType, readonly Attribute[]>> = {
+  image: ['src'],
+};
 
 /** What a node of each kind holds when the project says nothing of it. */
 const DEFAULTS: Partial<Record<SharedType, Record<string, unknown>>> = {
@@ -90,6 +101,12 @@ const PARTS: Partial<Record<SharedType, { read(node: YMap): Record<string, unkno
       putPorts(node, n.ports);
     },
   },
+  image: {
+    read: (node) => ({ caption: textOf(node.get('caption')) || undefined }),
+    write(node, n) {
+      if (n.type === 'image' && n.caption !== undefined) node.set('caption', new Y.Text(n.caption));
+    },
+  },
   legend: {
     read(node) {
       const held = node.get('names');
@@ -119,6 +136,7 @@ export function nodeOf(id: string, node: YMap): Node | null {
     const v = readAttribute(node, key);
     if (v !== undefined) out[key] = v;
   }
+  if (REQUIRED[type]?.some((key) => out[key] === undefined)) return null;
   const read = { ...out, ...PARTS[type]?.read(node) } as unknown as Node;
   // Made whole as a device read from a file is, so that one comes out the same on either.
   return read.type === 'device' ? wholeDevice(read) : read;

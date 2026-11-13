@@ -1,8 +1,10 @@
 import { type Connection, type Hocuspocus, Server } from '@hocuspocus/server';
 import { messageYjsSyncStep1 } from 'y-protocols/sync';
 import * as Y from 'yjs';
-import { type Answer, type LetGo, type Role, readCommit, readCredential, writeAccess, writeAnswer, writeLetGo } from '../../src/collab/protocol';
+import { type Answer, type LetGo, type Role, readCommit, readCredential, writeAccess, writeAnswer, writeArrival, writeLetGo } from '../../src/collab/protocol';
 import { type Denial, authenticate, authorize } from './access';
+import { pictureRoutes } from './pictureRoutes';
+import type { PictureStore } from './pictureStore';
 import type { CollabStore } from './store';
 
 /**
@@ -57,10 +59,12 @@ function watchAccess(hocuspocus: Hocuspocus, store: CollabStore): () => void {
  * is not revoked and the project not deleted, and only a client of the project's schema. Edits reach
  * the project only as commits of an editor (see src/collab/protocol.ts), answered once stored. A
  * client whose invite is revoked, or whose project is deleted, while connected is let go (see
- * watchAccess).
+ * watchAccess). The projects' pictures are sent and fetched over HTTP on the same port (see
+ * pictureRoutes.ts), kept in `pictures`; the clients of a project are told of each new one.
  */
-export function collabServer(store: CollabStore, options: { port: number; address?: string }): Server {
+export function collabServer(store: CollabStore, options: { port: number; address?: string; pictures: PictureStore }): Server {
   let unwatch = (): void => {};
+  const answerPictures = pictureRoutes(store, options.pictures, (project, name) => server.hocuspocus.documents.get(project)?.broadcastStateless(writeArrival(name)));
   const server: Server = new Server({
     port: options.port,
     address: options.address,
@@ -129,6 +133,11 @@ export function collabServer(store: CollabStore, options: { port: number; addres
 
     async onListen() {
       unwatch = watchAccess(server.hocuspocus, store);
+    },
+
+    async onRequest({ request, response }) {
+      // Rejected with nothing once answered: Hocuspocus answers every request it is handed back with a welcome.
+      if (await answerPictures(request, response)) throw null;
     },
 
     async onDestroy() {
