@@ -10,6 +10,7 @@ import type { DeviceNode, Node, Pt, UserPreset } from '../model/types';
 import { type Tool, useStore, useTakes } from '../model/store';
 import { ask, getSetting, setSetting } from '../platform/io';
 import { ICON, ico, shapeIcon } from './icons';
+import { lookingOnly } from '../collab/role';
 
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: ReactNode }[] = [
@@ -208,6 +209,7 @@ export function Toolbar() {
   const library = useStore((s) => s.docks.library);
   const kind = kindOf(useStore((s) => s.doc));
   const takes = useTakes();
+  const looking = useStore(lookingOnly);
   const st = useStore.getState;
   return (
     <>
@@ -240,12 +242,12 @@ export function Toolbar() {
             {ico(<path d="M3 4h14v12H3zM3 13l4-4 3 3 3-4 4 5M7 7.5h.01" />)}
           </button>
         )}
-        {kind.library && (
+        {kind.library && !looking && (
           <button data-tip="凡例（使っている線の色の一覧。色を変えると追従します）" aria-label="凡例を置く" {...placeable('凡例', () => makeLegend(new Set(), 0, 0), (at) => addLegend(at))}>
             {ico(<path d="M3 6h5M3 10h5M3 14h5M11 6h6M11 10h6M11 14h4" />)}
           </button>
         )}
-        {kind.library && (
+        {kind.library && !looking && (
           <>
             <hr />
             <button className={library ? 'on' : ''} data-tip={`${kind.library.label}ライブラリ（L）`} aria-label={`${kind.library.label}ライブラリ`} onClick={() => st().setDock('library')}>
@@ -255,7 +257,7 @@ export function Toolbar() {
           </>
         )}
       </nav>
-      {library && kind.library && <Library />}
+      {library && kind.library && !looking && <Library />}
     </>
   );
 }

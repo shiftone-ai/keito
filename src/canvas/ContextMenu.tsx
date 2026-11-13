@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { copySelection, duplicateSelection, pasteClipboard, restack, useStore, useTakes } from '../model/store';
 import { isUnderlay } from '../model/geometry';
 import { copyText, shortcuts } from '../platform/io';
+import { lookingOnly } from '../collab/role';
 
 const st = useStore.getState;
 
@@ -22,6 +23,7 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
   const selection = useStore((s) => s.selection);
   const nodes = useStore((s) => s.doc.nodes.filter((n) => s.selection.includes(n.id)).length);
   const takes = useTakes();
+  const looking = useStore(lookingOnly);
   useEffect(() => {
     const away = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
@@ -67,7 +69,7 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
           {item('切り取り', '⌘X', () => {
             copy();
             st().removeIds(st().selection);
-          }, !nodes)}
+          }, !nodes || looking)}
         </>
       )}
       {item('貼り付け', '⌘V', () => pasteClipboard(), !takes('copying'))}
@@ -78,7 +80,7 @@ export function ContextMenu({ at, close }: { at: { x: number; y: number }; close
           {item('最前面へ', '', () => restack('front'), !nodes || !takes('restack'))}
           {item('最背面へ', '', () => restack('back'), !nodes || !takes('restack'))}
           <hr />
-          {item('削除', 'Delete', () => st().removeIds(st().selection))}
+          {item('削除', 'Delete', () => st().removeIds(st().selection), looking)}
         </>
       )}
       {selection.length === 0 && item('すべて選択', '⌘A', () => st().select([...st().doc.nodes.filter((n) => !isUnderlay(n)).map((n) => n.id), ...st().doc.edges.map((e) => e.id)]))}

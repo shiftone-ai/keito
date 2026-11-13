@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
-import { openStore } from '../server/collab/store';
+import { type CollabStore, openStore } from '../server/collab/store';
 import type { DeviceStore, KeptProject } from '../src/collab/kept';
 import type { ProjectSeed } from '../src/collab/model';
 import type { Doc } from '../src/model/types';
@@ -22,6 +22,16 @@ export function seedData(kind?: Doc['kind']): { data: string; seed: ProjectSeed;
   }
 }
 
+/** Do to the projects in `data` what the administration commands (npm run collab) do, while the server runs. */
+export function administer<T>(data: string, fn: (store: CollabStore) => T): T {
+  const store = openStore(join(data, 'keito-collab.sqlite'));
+  try {
+    return fn(store);
+  } finally {
+    store.close();
+  }
+}
+
 export interface RunningServer {
   /** Where clients connect: ws://127.0.0.1:<port>. */
   url: string;
@@ -31,14 +41,19 @@ export interface RunningServer {
   kill(): Promise<void>;
 }
 
-/** Run the collaboration server as its own process on a free port, over the SQLite file in `data`. */
-export async function startServer(data: string, port = 0): Promise<RunningServer> {
+/**
+ * Run the collaboration server as its own process on a free port, over the SQLite file in `data`.
+ * With `output`, every line the server prints (stdout and stderr) is pushed there instead of shown.
+ */
+export async function startServer(data: string, port = 0, output?: string[]): Promise<RunningServer> {
   const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', 'server/collab/cli.ts', 'serve', '--data', data, '--host', '127.0.0.1', '--port', String(port)], {
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'pipe', output ? 'pipe' : 'inherit'],
   });
   const lines = createInterface({ input: child.stdout! });
+  if (output) createInterface({ input: child.stderr! }).on('line', (line) => output.push(line));
   const listening = new Promise<number>((resolve, reject) => {
     lines.on('line', (line) => {
+      output?.push(line);
       const m = /listening on .*:(\d+)$/.exec(line);
       if (m) resolve(Number(m[1]));
     });

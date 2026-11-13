@@ -8,6 +8,7 @@ import { type CreateKind, makeEdge, makeImage, makeNode } from '../model/presets
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
+import { VIEW_ONLY, lookingOnly } from '../collab/role';
 import { NOT_TAKEN } from '../collab/scope';
 import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
@@ -141,7 +142,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
 export function insertText(text: string): void {
   const s = st();
   if (!kindOf(s.doc).tools.includes('text')) return;
-  if (!takesIn(s)('text')) return say(NOT_TAKEN);
+  if (!takesIn(s)('text')) return say(lookingOnly(s) ? VIEW_ONLY : NOT_TAKEN);
   const p = viewCenter();
   const n = makeNode('text', snap(p.x), snap(p.y), allIds(s.doc), text);
   n.h = Math.max(n.h, textHeightFor(n, text));
@@ -239,7 +240,7 @@ function neededHeight(n: Node, text: string): number | null {
 }
 
 export function Canvas() {
-  const viewing = useStore((s) => !!s.viewing);
+  const looking = useStore(lookingOnly);
   const svgRef = useRef<SVGSVGElement>(null);
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
@@ -428,9 +429,9 @@ export function Canvas() {
       return what.place(p);
     }
     // A box tool: a click puts one there, a drag draws it out to the size wanted.
-    if (placesBox(tool) && !st().viewing) return begin(e, { kind: 'place', start: p });
+    if (placesBox(tool) && !lookingOnly(st())) return begin(e, { kind: 'place', start: p });
     // Double-click on empty canvas drops a box and starts typing, like a whiteboard.
-    if (doubleClick(e, 'canvas') && !st().viewing) return dropBox(p);
+    if (doubleClick(e, 'canvas') && !lookingOnly(st())) return dropBox(p);
     const base = e.shiftKey ? st().selection : [];
     st().select(base);
     begin(e, { kind: 'marquee', start: p, base });
@@ -441,8 +442,8 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    // On an old state, a click shows what it was (in the panel), and nothing moves.
-    if (s.viewing) return s.select(e.shiftKey ? (s.selection.includes(n.id) ? s.selection.filter((id) => id !== n.id) : [...s.selection, n.id]) : [n.id]);
+    // On an old state, or as a viewer, a click shows what it is (in the panel), and nothing moves.
+    if (lookingOnly(s)) return s.select(e.shiftKey ? (s.selection.includes(n.id) ? s.selection.filter((id) => id !== n.id) : [...s.selection, n.id]) : [n.id]);
     if (doubleClick(e, n.id) && hasText(n)) {
       // Double-clicking the body of an area frame adds a box there; its title strip renames it.
       const p = world(e);
@@ -493,7 +494,7 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    if (doubleClick(e, id) && !s.viewing) {
+    if (doubleClick(e, id) && !lookingOnly(s)) {
       s.select([id]);
       s.setEditing(id);
       return;
@@ -504,7 +505,7 @@ export function Canvas() {
 
   const onDoubleClick = (e: RMouseEvent) => {
     const s = st();
-    if (s.editing || tool !== 'select' || s.viewing) return;
+    if (s.editing || tool !== 'select' || lookingOnly(s)) return;
     const p = world(e);
     const n = nodeAt(s.doc, p);
     const tol = 8 / s.view.k;
@@ -522,13 +523,13 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    if (doubleClick(e, id) && !s.viewing) {
+    if (doubleClick(e, id) && !lookingOnly(s)) {
       s.select([id]);
       s.setEditing(id);
       return;
     }
     s.select(e.shiftKey ? (s.selection.includes(id) ? s.selection.filter((x) => x !== id) : [...s.selection, id]) : [id]);
-    if (!s.viewing) begin(e, { kind: 'label', id, start: world(e), moved: false });
+    if (!lookingOnly(s)) begin(e, { kind: 'label', id, start: world(e), moved: false });
   };
 
   const onSegmentDown = (e: RPointerEvent, id: string, seg: number, horizontal: boolean, route: Pt[]) => {
@@ -877,8 +878,8 @@ export function Canvas() {
   const selectedEdge = selection.length === 1 ? doc.edges.find((e) => e.id === selection[0]) : undefined;
   const handleNode = doc.nodes.find((n) => n.id === hover && n.id !== hush && hasHandles(n)) ?? (single && hasHandles(single) ? single : undefined);
   const hs = 8 / view.k;
-  // Hidden rather than refused when used: an old state from the history is only looked at.
-  const idle = tool === 'select' && !editing && !busy && !viewing;
+  // Hidden rather than refused when used: an old state from the history, or a viewer's board, is only looked at.
+  const idle = tool === 'select' && !editing && !busy && !looking;
   const cursor = space || tool === 'pan' ? 'grab' : tool === 'select' && !placing ? 'default' : 'crosshair';
   // What waits to be placed, outlined under the pointer: a library item, or the box an armed tool makes.
   const waiting = placing ? { label: placing.label, size: placing.size } : placesBox(tool) && boxSize(tool) && !busy ? { label: '', size: boxSize(tool)! } : null;
@@ -1066,7 +1067,7 @@ export function Canvas() {
       {/* Keyed by the selection so an open menu never carries over to another object. */}
       {idle && selection.length > 0 && !menuAt && <QuickBar key={selection.join(',')} />}
       {menuAt && <ContextMenu at={menuAt} close={() => setMenuAt(null)} />}
-      {collab && !collab.boards.length ? <EmptyProject collab={collab} add={() => openBoards(true)} /> : doc.nodes.length === 0 && !viewing && !placing && <EmptyHint doc={doc} />}
+      {collab && !collab.boards.length ? <EmptyProject collab={collab} add={() => openBoards(true)} /> : doc.nodes.length === 0 && !looking && !placing && <EmptyHint doc={doc} />}
       {(placing || placesBox(tool)) && !busy && (
         <div className="place-hint">
           {placing ? `「${placing.label}」: 置きたい所をクリック` : tool === 'sequence' ? '置きたい所をクリック' : '置きたい所をクリック、ドラッグで大きさを決めて置く'}
@@ -1117,7 +1118,7 @@ function ImeCatcher({ onSpace }: { onSpace: () => void }) {
   const [converting, setConverting] = useState(false);
   // Shift+1 just pressed: its "！" is not the shape's.
   const bang = useRef(false);
-  const only = useStore((s) => (s.selection.length === 1 && !s.editing && !s.viewing ? s.selection[0] : ''));
+  const only = useStore((s) => (s.selection.length === 1 && !s.editing && !lookingOnly(s) ? s.selection[0] : ''));
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
   const panel = useStore((s) => s.panel);

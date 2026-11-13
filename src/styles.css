@@ -1095,6 +1095,15 @@ td.empty {
   display: block;
   font-size: 10px;
 }
+/* A viewer's state: an eye beside the words, on one line */
+.save-state.viewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
 .save-state.error {
   /* Not left inline: the button would drop below a two-line state and push the board down. */
   display: inline-flex;
