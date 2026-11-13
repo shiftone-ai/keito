@@ -7,7 +7,7 @@ import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, dele
 import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
-import { type Refusal, readAnswer, readDeleted, writeCommit, writeCredential } from './protocol';
+import { type Refusal, type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
 
 /** Where a shared project is, and the credential that lets this client in. */
 export interface SharedJoin {
@@ -18,19 +18,21 @@ export interface SharedJoin {
 }
 
 /**
- * Why the link is 'refused': a refusal of the server (see protocol.ts; `deleted` also while connected),
- * or `unreachable`, no server answered.
+ * Why the link is 'refused': a refusal of the server (see protocol.ts; `deleted` and `revoked` also
+ * while connected), or `unreachable`, no server answered.
  */
 export type LinkRefusal = Refusal | 'unreachable';
 
 /**
- * How this client stands with the server. `pending`: edits made here and not yet confirmed stored;
- * `failure`: why the last store failed (they are sent again); `refusal`: why the link is 'refused'.
- * `device`: whether the project is kept on this device as this page holds it (see kept.ts), and
- * `deviceFailure`, why not while it is 'failed'.
+ * How this client stands with the server. `role`: what the server let this client in to do, null until
+ * it has said (the project opened from the copy kept on this device, offline); `pending`: edits made
+ * here and not yet confirmed stored; `failure`: why the last store failed (they are sent again);
+ * `refusal`: why the link is 'refused'. `device`: whether the project is kept on this device as this
+ * page holds it (see kept.ts), and `deviceFailure`, why not while it is 'failed'.
  */
 export interface ShareStatus {
   link: 'connecting' | 'online' | 'offline' | 'refused';
+  role: Role | null;
   pending: number;
   failure: string | null;
   refusal: LinkRefusal | null;
@@ -41,6 +43,7 @@ export interface ShareStatus {
 /** What the user is told when the project cannot be opened (or is left), by the reason it was turned away. */
 const REFUSALS: Record<LinkRefusal, string> = {
   deleted: 'この共有案件は削除されています',
+  revoked: 'この共有案件への招待は取り消されました',
   schema: 'この版の keito では開けない共有案件です',
   unreachable: '共同編集先に接続できません（サーバーが動いているか、参加リンクのアドレスが正しいかを確かめてください）',
   'no-access': '共有案件に接続できません（参加の権限がないか、案件がありません）',
@@ -81,7 +84,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
   const histories = new Map<string, Y.UndoManager>();
   const pending = new Map<string, Uint8Array>();
   const listeners = new Set<() => void>();
-  const status: Pick<ShareStatus, 'link' | 'failure' | 'refusal'> = { link: 'connecting', failure: null, refusal: null };
+  const status: Pick<ShareStatus, 'link' | 'role' | 'failure' | 'refusal'> = { link: 'connecting', role: null, failure: null, refusal: null };
   let closed = false;
   /** Whether the project is on screen: read from the server, or from the copy kept on this device. */
   let joined = false;
@@ -148,7 +151,10 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     },
     onAuthenticationFailed: ({ reason }) => refuse(reason),
     onStateless: ({ payload }) => {
-      if (readDeleted(payload)) return refuse('deleted');
+      const gone = readLetGo(payload);
+      if (gone) return refuse(gone);
+      const role = readAccess(payload);
+      if (role) return admit(role);
       const answer = readAnswer(payload);
       if (closed || !answer || !pending.has(answer.op)) return;
       if (answer.type === 'saved') {
@@ -177,11 +183,26 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     notify();
   }
 
-  /** Whether this client still edits the project: not closed, nor turned away (an edit then could never be stored). */
-  const editing = (): boolean => !closed && status.link !== 'refused';
+  /**
+   * The server let this client in with `role`. A viewer's copy kept on this device is kept as one the
+   * server turned away (see kept.ts): it opens no more, and its unconfirmed edits, made while the
+   * server let this device edit, are never sent under the viewer's invite.
+   */
+  function admit(role: Role): void {
+    if (closed || status.role === role) return;
+    status.role = role;
+    if (role === 'viewer') copy.refused();
+    notify();
+  }
+
+  /**
+   * Whether this client still edits the project: not closed, nor turned away, nor let in as a viewer
+   * (an edit then could never be stored).
+   */
+  const editing = (): boolean => !closed && status.link !== 'refused' && status.role !== 'viewer';
 
   function send(op: string, update: Uint8Array): void {
-    if (!closed && status.link === 'online') provider?.sendStateless(writeCommit(op, update));
+    if (editing() && status.link === 'online') provider?.sendStateless(writeCommit(op, update));
   }
 
   /** Send every unconfirmed edit again, oldest first (the server stores each op id once). */
