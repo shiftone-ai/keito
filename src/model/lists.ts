@@ -81,6 +81,21 @@ export function moveRow(doc: Doc, t: Table, from: number, to: number): Doc {
   return { ...doc, listOrder: { ...doc.listOrder, [t.reorder]: order.flatMap((row) => body[row]) } };
 }
 
+/**
+ * A drag of row `from` to `to` in `was`, the table when the drag began, as it goes in `now`, the
+ * table when the row is let go: the same row, put below the row it was let go at when dragged down,
+ * above it when dragged up, wherever another person's edit has moved them meanwhile. null when
+ * either row is no longer listed.
+ */
+export function dragIn(was: Table, now: Table, from: number, to: number): { from: number; to: number } | null {
+  if (JSON.stringify(was.refs) === JSON.stringify(now.refs)) return { from, to };
+  const find = (row: readonly string[]): number => now.refs.findIndex((ids) => ids.some((id) => row.includes(id)));
+  const at = find(was.refs[from]);
+  const beside = find(was.refs[to]);
+  if (at < 0 || beside < 0) return null;
+  return { from: at, to: beside - (at < beside ? 1 : 0) + (from < to ? 1 : 0) };
+}
+
 /** The board with one list's hand-made order dropped. */
 export function clearOrder(doc: Doc, list: string): Doc {
   const { [list]: _, ...rest } = doc.listOrder ?? {};

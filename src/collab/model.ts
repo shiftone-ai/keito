@@ -4,6 +4,7 @@ import { boardLines, boardNodes, liveBoard, putBoard } from './boards';
 import type { BoardEdit } from './edits';
 import { type YMap, readInOrder, textOf } from './entries';
 import { readLines, writeLines } from './lines';
+import { readListOrder, writeListOrder } from './listOrder';
 import { nodeOf, writeNodes } from './nodes';
 import { validDrawing } from './valid';
 
@@ -15,8 +16,9 @@ import { validDrawing } from './valid';
  * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map>, lines: Y.Map<line id, Y.Map> }>
  * deletions: Y.Map<mark, board id>
  *
- * See nodes.ts for a node, lines.ts for a line. Which boards there are, and how one stays deleted, is
- * boards.ts's.
+ * See nodes.ts for a node, lines.ts for a line, order.ts for the order they are drawn and listed in,
+ * listOrder.ts for the orders of the lists put by hand. Which boards there are, and how one stays
+ * deleted, is boards.ts's.
  */
 export const SCHEMA = 2;
 
@@ -62,22 +64,24 @@ export function renameProject(ydoc: Y.Doc, title: string, origin: unknown): void
 /**
  * A board as the drawing, the tables and the exports read it; null for one deleted, or not in the
  * project. Nodes come in their drawing order, lines in the order they were put there (each by
- * `order`, then id); a node of a kind this version cannot show is left out rather than guessed at,
- * and so is a line it cannot draw (see validDrawing).
+ * `order`, then id), and the lists in the orders put by hand; a node of a kind this version cannot
+ * show is left out rather than guessed at, and so is a line it cannot draw (see validDrawing).
  */
 export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
   const board = liveBoard(ydoc, boardId);
   if (!board) return null;
   const nodes = boardNodes(ydoc, boardId);
   const lines = boardLines(ydoc, boardId);
-  return validDrawing({
+  const doc: Doc = {
     version: 1,
     id: boardId,
     kind: board.kind,
     meta: { title: board.title, project: projectTitle(ydoc) },
     nodes: nodes ? readInOrder(nodes, nodeOf) : [],
     edges: lines ? readLines(lines) : [],
-  });
+  };
+  const listOrder = readListOrder([nodes, lines].filter((map): map is YMap => !!map), new Set([...doc.nodes, ...doc.edges].map((x) => x.id)));
+  return validDrawing(listOrder ? { ...doc, listOrder } : doc);
 }
 
 /** What a board holds that its edits change. */
@@ -86,8 +90,9 @@ export interface BoardParts {
   lines: YMap;
 }
 
-/** Write an edit of a board into what it holds (within the caller's transaction): see writeNodes and writeLines. */
+/** Write an edit of a board into what it holds (within the caller's transaction): see writeNodes, writeLines and writeListOrder. */
 export function writeEdit(board: BoardParts, edit: BoardEdit): void {
   writeNodes(board.nodes, edit);
   writeLines(board.lines, edit.lines);
+  writeListOrder([board.nodes, board.lines], edit.lists);
 }

@@ -7,12 +7,13 @@ import { LINE_ATTRIBUTES, type LineAttribute } from './scope';
 /**
  * The lines of a shared board as the project holds them (see model.ts for the rest of the project):
  *
- * line: Y.Map { id, order, ends: { from, to }, label: Y.Text, note: Y.Text, …its attributes }
+ * line: Y.Map { id, order, ends: { from, to }, label: Y.Text, note: Y.Text, …its attributes, …its places in lists }
  *
  * The two ends are one value: two people pulling the ends of one line at once end with the ends one
  * of them gave it, never a line neither drew. Each attribute is a key of its own (see LINE_ATTRIBUTES
  * in scope.ts), so one person's rewiring and another's change to the cable are both kept. What the
- * drawing leaves out (a line whose node or port is gone) is valid.ts's.
+ * drawing leaves out (a line whose node or port is gone) is valid.ts's; its places in the lists put
+ * in order by hand, listOrder.ts's.
  */
 
 const isPoint: Check = (v) => !!v && typeof v === 'object' && isNumber((v as Pt).x) && isNumber((v as Pt).y);

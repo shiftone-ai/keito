@@ -3,19 +3,21 @@ import { wholeDevice } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
 import { FILL_STYLES, type Node, SHAPE_KINDS } from '../model/types';
 import type { BoardEdit, Change } from './edits';
-import { type Check, type YMap, isBoolean, isNumber, isString, oneOf, orderRange, textOf } from './entries';
+import { type Check, type YMap, isBoolean, isNumber, isString, moveEntries, oneOf, orderRange, textOf } from './entries';
 import { putPorts, readPorts, writePorts } from './ports';
 import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
 
 /**
  * A node of a shared board as the project holds it (see model.ts for the rest of the project):
  *
- * node:   Y.Map { id, type, order, pos: {x, y}, size: {w, h}, text: Y.Text, …its attributes }
+ * node:   Y.Map { id, type, order, pos: {x, y}, size: {w, h}, text: Y.Text, …its attributes, …its places in lists }
  * device: … note: Y.Text, ports (see ports.ts)
  * legend: … names: Y.Map<row, Y.Text>, hidden: Y.Map<row, true>
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
- * attributes of one node keep all their changes. What is typed by hand is a Y.Text.
+ * attributes of one node keep all their changes. What is typed by hand is a Y.Text. `order` is its
+ * place in the order the board is drawn in (see order.ts); its places in the lists put in order by
+ * hand are listOrder.ts's.
  */
 
 /** What a value written under each attribute must be to be read back: anything else is left unread. */
@@ -149,13 +151,10 @@ function changeNode(node: YMap, change: Change): void {
 /**
  * Write the nodes and ports of an edit into a board's nodes (within the caller's transaction). A
  * change to a node or a port no longer there is dropped, never bringing it back; one put there under
- * an id already taken is not written over what holds it. Nodes put beneath the rest keep their
- * order, the first furthest back (as withEdit shows them).
+ * an id already taken is not written over what holds it. Nodes moved go where withEdit shows them;
+ * nodes put beneath the rest keep their order, the first furthest back.
  */
 export function writeNodes(nodes: YMap, edit: BoardEdit): void {
-  const range = orderRange(nodes);
-  let front = range.front;
-  let below = range.back - edit.add.filter((x) => x.back).length;
   for (const id of edit.remove) nodes.delete(id);
   for (const [id, change] of edit.set) {
     const node = nodes.get(id);
@@ -165,6 +164,10 @@ export function writeNodes(nodes: YMap, edit: BoardEdit): void {
     const node = nodes.get(id);
     if (node instanceof Y.Map) writePorts(node, ports);
   }
+  moveEntries(nodes, edit.moves);
+  const range = orderRange(nodes);
+  let front = range.front;
+  let below = range.back - edit.add.filter((x) => x.back).length;
   for (const { node, back: under } of edit.add) {
     if (nodes.has(node.id)) continue;
     putNode(nodes, node, under ? below++ : ++front);

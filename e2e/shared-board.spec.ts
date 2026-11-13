@@ -218,8 +218,7 @@ test('a shared board turns away what it does not take yet, and a board of this m
   await expect(a.locator('.quickbar button[aria-label^="削除"]')).toHaveCount(1);
   await expect(a.locator('.quickbar button[aria-label^="文字を編集"]')).toHaveCount(0);
   await shape(a).click({ button: 'right' });
-  for (const label of ['コピー', '切り取り', '貼り付け', '複製', '削除']) await expect(a.locator('.context-menu button', { hasText: label })).toBeEnabled();
-  for (const label of ['最前面へ', '最背面へ']) await expect(a.locator('.context-menu button', { hasText: label })).toBeDisabled();
+  for (const label of ['コピー', '切り取り', '貼り付け', '複製', '最前面へ', '最背面へ', '削除']) await expect(a.locator('.context-menu button', { hasText: label })).toBeEnabled();
   await a.keyboard.press('Escape');
 
   // Leaving for a board of this machine closes the shared project there.
