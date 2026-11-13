@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { wholeDevice } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
 import { FILL_STYLES, type Node, SHAPE_KINDS } from '../model/types';
+import { isParticular, placedFrom, putLinks, readLinks, writeShared } from './devices';
 import type { BoardEdit, Change } from './edits';
 import { type Check, type YMap, isBoolean, isNumber, isString, moveEntries, oneOf, orderRange, textOf } from './entries';
 import { putPorts, readPorts, writePorts } from './ports';
@@ -11,7 +12,7 @@ import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
  * A node of a shared board as the project holds it (see model.ts for the rest of the project):
  *
  * node:   Y.Map { id, type, order, pos: {x, y}, size: {w, h}, text: Y.Text, …its attributes, …its places in lists }
- * device: … note: Y.Text, ports (see ports.ts)
+ * device: … note: Y.Text, ports (see ports.ts), shared, runsOn: keys of the project's shared devices (see devices.ts)
  * legend: … names: Y.Map<row, Y.Text>, hidden: Y.Map<row, true>
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
@@ -107,7 +108,10 @@ const PARTS: Partial<Record<SharedType, { read(node: YMap): Record<string, unkno
   },
 };
 
-/** A node as the drawing reads it; null for a node of a kind this version does not share, or one not whole. */
+/**
+ * A node as the drawing reads it; null for a node of a kind this version does not share, one not
+ * whole, or a device placed from a shared device the project does not have (see devices.ts).
+ */
 export function nodeOf(id: string, node: YMap): Node | null {
   const type = node.get('type');
   if (!isShared(type)) return null;
@@ -119,7 +123,9 @@ export function nodeOf(id: string, node: YMap): Node | null {
     const v = readAttribute(node, key);
     if (v !== undefined) out[key] = v;
   }
-  const read = { ...out, ...PARTS[type]?.read(node) } as unknown as Node;
+  const links = type === 'device' ? readLinks(node) : {};
+  if (!links) return null;
+  const read = { ...out, ...PARTS[type]?.read(node), ...links } as unknown as Node;
   // Made whole as a device read from a file is, so that one comes out the same on either.
   return read.type === 'device' ? wholeDevice(read) : read;
 }
@@ -139,13 +145,22 @@ function putNode(nodes: YMap, n: Node, order: number): void {
   // A set of rows is made with the node even when empty: two people making it at once would each make one, and one would be lost.
   for (const key of ATTRIBUTES[type]) if (key === 'hidden' || v[key] !== undefined) writeAttribute(node, key, v[key]);
   PARTS[type]?.write(node, n);
+  if (n.type === 'device') putLinks(node, n);
 }
 
-/** Change attributes of a node in place, each on its own: what others changed beside them stays. */
+/**
+ * Change attributes of a node in place, each on its own: what others changed beside them stays. The
+ * name and particulars of a device placed from a shared device are the shared device's (see devices.ts).
+ */
 function changeNode(node: YMap, change: Change): void {
   if ('x' in change) node.set('pos', { x: change.x, y: change.y });
   if ('w' in change) node.set('size', { w: change.w, h: change.h });
-  for (const [key, v] of Object.entries(change)) if (key !== 'x' && key !== 'y' && key !== 'w' && key !== 'h') writeAttribute(node, key as Attribute, v);
+  const shared = node.get('type') === 'device' ? placedFrom(node) : null;
+  for (const [key, v] of Object.entries(change)) {
+    if (key === 'x' || key === 'y' || key === 'w' || key === 'h') continue;
+    if (shared && isParticular(key)) writeShared(shared, key, v);
+    else writeAttribute(node, key as Attribute, v);
+  }
 }
 
 /**

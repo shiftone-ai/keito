@@ -3,16 +3,19 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { type CellEdit, TABLES, type Table, bands, clearOrder, dragIn, editCell, editable, moveRow } from '../model/lists';
 import { kindOf } from '../model/kinds';
 import { allSignals, groupSignals } from '../model/signals';
-import { reveal, useStore } from '../model/store';
+import { reveal, useStore, useTakes } from '../model/store';
 import { openExport } from './ExportPanel';
 import { ICON } from './icons';
 import { composing } from './keys';
 import { copyText, linkClick } from '../platform/io';
 
+/** Cells of text typed by hand (names, notes, labels): filled only where the board takes typing (see EditKind). */
+const TYPED = new Set(['text', 'note', 'label']);
 
 export function ListsPanel() {
   const doc = useStore((s) => s.doc);
   const selection = useStore((s) => s.selection);
+  const takes = useTakes();
   const [tab, setTab] = useState(0);
   // The cell being edited in place, by its row and column in the table on show.
   const [copied, setCopied] = useState(false);
@@ -26,6 +29,10 @@ export function ListsPanel() {
   const t = tables[at];
   // A board with no lists (a sequence or free board) shows none, even if the panel was left open.
   if (!t) return null;
+  const cellEdit = (row: number, col: number): CellEdit | null => {
+    const edit = editable(t, row, col);
+    return edit && (takes('typing') || !TYPED.has(edit.field)) ? edit : null;
+  };
   // The rows in the order they are shown: while a row is dragged, already where it would go.
   const order = t.rows.map((_, i) => i);
   if (drag) order.splice(drag.to, 0, ...order.splice(drag.from, 1));
@@ -33,7 +40,7 @@ export function ListsPanel() {
   const nextCell = (row: number, col: number, step: 1 | -1): { row: number; col: number } | null => {
     const cells = order.flatMap((r) => t.head.map((_, c) => ({ row: r, col: c })));
     let k = cells.findIndex((x) => x.row === row && x.col === col);
-    for (k += step; k >= 0 && k < cells.length; k += step) if (editable(t, cells[k].row, cells[k].col)) return cells[k];
+    for (k += step; k >= 0 && k < cells.length; k += step) if (cellEdit(cells[k].row, cells[k].col)) return cells[k];
     return null;
   };
 
@@ -250,7 +257,7 @@ export function ListsPanel() {
                     </td>
                   ))}
                 {row.map((c, j) => {
-                  const edit = editable(t, i, j);
+                  const edit = cellEdit(i, j);
                   // The row number is a handle too: a wider target than the grip alone.
                   const handle = !!t.reorder && t.head[j] === 'No' && !(t.total && i === t.rows.length - 1);
                   const cls = [t.numeric?.includes(t.head[j]) ? 'num' : '', edit ? 'editable' : '', handle ? 'handle' : ''].filter(Boolean).join(' ');

@@ -2,11 +2,13 @@ import { sameBoard, stillIn } from '../model/history';
 import { fitLegends } from '../model/legend';
 import { shareIds } from '../model/ids';
 import type { State, View } from '../model/store';
-import type { Target } from '../model/target';
+import type { DeviceLinks, Target } from '../model/target';
 import type { Doc } from '../model/types';
-import { ask } from '../platform/io';
+import { ask, shortcuts } from '../platform/io';
 import type { LinkRefusal, SharedProject } from './client';
+import type { DeviceLink } from './devices';
 import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
+import { deleteQuestion, impactOf } from './impact';
 import { VIEW_ONLY } from './role';
 import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
 import { type BoardManagement, sharedTabs } from './tabs';
@@ -126,7 +128,22 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     draft = noEdit();
     unshare();
     unshare = next ? shareIds(next) : () => {};
-    host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
+    host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: otherBoards([]), placing: null, tool: 'select', ...status() });
+  }
+
+  /**
+   * The project's other boards as it has them now (see State.others), those that did not change
+   * kept as they were in `was`, and `was` itself when none did.
+   */
+  function otherBoards(was: Doc[]): Doc[] {
+    const before = new Map(was.map((d) => [d.id, d]));
+    const now = project.boards().flatMap((b) => {
+      const doc = b.id === board ? null : project.board(b.id);
+      if (!doc) return [];
+      const old = before.get(b.id);
+      return [old && sameBoard(old, doc) ? old : doc];
+    });
+    return now.length === was.length && now.every((d, i) => d === was[i]) ? was : now;
   }
 
   /**
@@ -147,7 +164,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     const shown = view();
     const doc = sameBoard(shown, s.doc) ? s.doc : shown;
     const selection = stillIn(doc, s.selection);
-    host.set({ doc, ...(selection.length === s.selection.length ? {} : { selection }), ...status() });
+    host.set({ doc, ...(selection.length === s.selection.length ? {} : { selection }), others: otherBoards(s.others), ...status() });
   }
 
   /** Write the edit of the operation just ended to the project, as one edit (sent to be stored). */
@@ -157,6 +174,31 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     if (!isNoEdit(edit)) project.edit(board, edit);
     refresh();
   }
+
+  /** Link a device of the board to the project's shared devices, or unlink it (see DeviceLink): a step of its own. */
+  function link(change: DeviceLink): void {
+    if (!board || viewer()) return host.refuse();
+    host.commitOperation();
+    project.linkDevice(board, change);
+    refresh();
+  }
+
+  const devices: DeviceLinks = {
+    link: (node, to) => link({ type: 'link', node, to }),
+    unlink: (node) => link({ type: 'unlink', node }),
+    runOn: (node, on) => link({ type: 'runOn', node, host: on }),
+    async remove(node) {
+      if (!board || viewer()) return host.refuse();
+      const s = host.get();
+      const n = s.doc.nodes.find((x) => x.id === node);
+      const key = n?.type === 'device' ? n.shared : undefined;
+      if (!key) return;
+      const impact = impactOf([s.doc, ...s.others], key);
+      if (!(await ask(deleteQuestion(impact)))) return;
+      link({ type: 'delete', device: key });
+      host.say(shortcuts(`「${impact.name}」をすべてのボードから削除しました（⌘Z で戻せます）`));
+    },
+  };
 
   /** Undo or redo this page's last edit of the board: what others did stays. */
   function step(way: 'undo' | 'redo'): void {
@@ -231,6 +273,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       },
     },
     local: null,
+    devices,
     get refusal() {
       return viewer() ? VIEW_ONLY : board ? NOT_TAKEN : NO_BOARD;
     },

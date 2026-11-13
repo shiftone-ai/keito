@@ -15,7 +15,7 @@ export type ShareNode = DeviceNode;
 export const canShare = (n: Node): n is ShareNode => n.type === 'device';
 
 /** Particulars kept alike between devices. */
-const DEVICE_FIELDS = ['text', 'maker', 'model', 'category', 'ip', 'host', 'url'] as const;
+export const DEVICE_FIELDS = ['text', 'maker', 'model', 'category', 'ip', 'host', 'url'] as const;
 
 /** The particulars of a node that sharing keeps alike, as a comparable string. */
 export function signature(n: ShareNode): string {
@@ -69,7 +69,10 @@ export function deviceOf(entries: Entry[], key: string): DeviceNode | undefined 
 }
 
 /** A device's name as the host of software ("メインPC"), first line only. */
-export const deviceName = (d: DeviceNode): string => d.text.split('\n')[0].trim();
+export const deviceName = (d: Pick<DeviceNode, 'text'>): string => d.text.split('\n')[0].trim();
+
+/** The host name software takes from the device it runs on: the device's own, else its name. */
+export const hostName = (d: Pick<DeviceNode, 'text' | 'host'>): string => d.host?.trim() || deviceName(d);
 
 /**
  * The open board brought up to date with the rest of the project: shared nodes take newer
@@ -90,7 +93,7 @@ export function pull(doc: Doc, entries: Entry[]): Doc {
     }
     if (next.type === 'device' && next.runsOn) {
       const host = deviceOf(entries, next.runsOn);
-      const want = host ? { host: host.host?.trim() || deviceName(host), ip: host.ip } : null;
+      const want = host ? { host: hostName(host), ip: host.ip } : null;
       if (want && (want.host !== next.host || want.ip !== next.ip)) next = { ...next, ...want };
     }
     if (next !== n) changed = true;
