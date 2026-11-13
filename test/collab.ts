@@ -93,7 +93,9 @@ export function memoryDevice() {
     async change(key, edit) {
       await Promise.resolve();
       if (device.failing) throw device.failing;
-      kept.set(key, structuredClone(edit(structuredClone(kept.get(key) ?? null))));
+      const next = edit(structuredClone(kept.get(key) ?? null));
+      if (next) kept.set(key, structuredClone(next));
+      else kept.delete(key);
     },
   };
   return Object.assign(device, { store });

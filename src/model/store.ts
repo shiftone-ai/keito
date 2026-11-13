@@ -3,7 +3,9 @@ import type { SharedBoardInfo } from '../collab/boards';
 import type { DeviceStore } from '../collab/kept';
 import type { EditKind } from '../collab/scope';
 import type { BoardManagement } from '../collab/tabs';
-import { sharedTarget } from '../collab/target';
+import { storedJoin } from '../collab/join';
+import { refusalText } from '../collab/refusals';
+import { type Recovery, sharedTarget } from '../collab/target';
 import { localEdits } from './edits';
 import { fitLegends } from './legend';
 import { drawingOf, entryFor, fingerprint, sameBoard, thin } from './history';
@@ -87,6 +89,8 @@ export interface CollabState extends ShareStatus, Steps {
   manage: BoardManagement;
   /** Edits the server has not stored are not kept on this device either: they are in this page alone. */
   unkept: boolean;
+  /** Set while the server turns away edits of this page (`link` 'refused'): what can be done with them. */
+  recover: Recovery | null;
   /** What the board takes (see Target.takes), without telling the user anything. */
   takes(what: EditKind): boolean;
 }
@@ -839,7 +843,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     const current = scope();
     if (!b) return false;
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
-    const { joinProject, refusalText } = await import('../collab/client');
+    const { joinProject } = await import('../collab/client');
     if (!current()) return false;
     const project = joinProject(join, options.device === undefined ? browserDevice : options.device);
     try {
@@ -874,7 +878,10 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
         if (view) set({ view });
         else frame(useStore.getState().fit);
       },
-      refused: (refusal) => leaveShared(refusalText(refusal), project.status().pending),
+      refused: (refusal) => leaveShared(refusalText(refusal)),
+      keepLocally,
+      openLocal: (id) => void openLocal(id),
+      rejoin: () => void rejoin(join),
     });
     target = shared;
     shared.start();
@@ -883,10 +890,15 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
 
   /**
    * Leave a shared project that turned this page away while it was open (deleted …) for a board of
-   * this machine: the one last shown here, else the first. The user is told why, and of the edits
-   * the project will never store.
+   * this machine (see backToLocal). The user is told why.
    */
-  function leaveShared(why: string, unstored: number): void {
+  function leaveShared(why: string): void {
+    backToLocal();
+    void tell(`${why}。この端末のボードに戻ります。`);
+  }
+
+  /** Put a board of this machine on screen in place of a shared project: the one last shown here, else the first, else a new one. */
+  function backToLocal(): void {
     const { boards } = useStore.getState();
     const last = localStorage.getItem(CURRENT);
     const back = boards.find((b) => b.id === last)?.id ?? boards[0]?.id;
@@ -897,7 +909,38 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
         show(doc);
         await save.persist(doc);
       });
-    void tell(`${why}。この端末のボードに戻ります。${unstored ? `\n共同編集先に保存されていなかった変更 ${unstored} 件は、保存されません。` : ''}`);
+  }
+
+  /**
+   * Write a shared project's boards (as this page holds them) to this machine's store as new boards
+   * of `project`: their ids, or null, the user told why, when they could not all be written.
+   */
+  async function keepLocally(docs: Doc[], project: string): Promise<string[] | null> {
+    const b = backend;
+    if (!b) return null;
+    try {
+      const ids: string[] = [];
+      for (const d of docs) {
+        const doc = { ...d, id: randomId(), meta: { ...d.meta, project }, revisions: undefined };
+        await b.save(await externalize(readBoard(doc) ?? doc, b));
+        ids.push(doc.id);
+      }
+      set({ boards: await b.list() });
+      return ids;
+    } catch (e) {
+      void tell(`手元のボードにコピーできませんでした: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Open a shared project anew from its server (by the join link last opened for it here: a new
+   * invite, given since), in place of the one on screen; turned away again, a board of this machine
+   * is put on screen instead.
+   */
+  async function rejoin(join: SharedJoin): Promise<void> {
+    const current = scope();
+    if (!(await openCollab(storedJoin(join.project) ?? join)) && current()) backToLocal();
   }
 
   /** Bring a part of the board to the middle of the view, zooming in if it would be too small to read. */

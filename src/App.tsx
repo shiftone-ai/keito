@@ -14,6 +14,7 @@ import { BoardTabs } from './ui/BoardTabs';
 import { CommentsPanel } from './ui/Comments';
 import { Inspector } from './ui/Inspector';
 import { ListsPanel } from './ui/ListsPanel';
+import { RefusedBanner } from './ui/Refused';
 import { RevisionBanner } from './ui/Revisions';
 import { TOOL_KEYS, Toolbar } from './ui/Toolbar';
 import { TopBar } from './ui/TopBar';
@@ -252,6 +253,7 @@ export function App() {
         <Toolbar />
         <div className="stage">
           <RevisionBanner />
+          <RefusedBanner />
           <Canvas />
           <SearchBar />
           <Notice />

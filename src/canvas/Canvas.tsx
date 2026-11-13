@@ -8,7 +8,7 @@ import { type CreateKind, makeEdge, makeImage, makeNode } from '../model/presets
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
-import { VIEW_ONLY, lookingOnly } from '../collab/role';
+import { lookingNote, lookingOnly } from '../collab/role';
 import { NOT_TAKEN } from '../collab/scope';
 import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
@@ -142,7 +142,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
 export function insertText(text: string): void {
   const s = st();
   if (!kindOf(s.doc).tools.includes('text')) return;
-  if (!takesIn(s)('text')) return say(lookingOnly(s) ? VIEW_ONLY : NOT_TAKEN);
+  if (!takesIn(s)('text')) return say(lookingOnly(s) ? lookingNote(s) : NOT_TAKEN);
   const p = viewCenter();
   const n = makeNode('text', snap(p.x), snap(p.y), allIds(s.doc), text);
   n.h = Math.max(n.h, textHeightFor(n, text));

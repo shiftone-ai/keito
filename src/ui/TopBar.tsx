@@ -68,10 +68,21 @@ const LOOK = (
 /**
  * The save state of a shared project's board: saved once the collaboration server has stored the
  * edits, not when it has them; until then, whether this device keeps them. A viewer, who saves
- * nothing, is shown that it only looks, and whether it is connected.
+ * nothing, is shown that it only looks, and whether it is connected. Turned away by the server, it
+ * shows only that the edits are not sent, and whether this device keeps them: what can be done with
+ * them is the banner's over the board (see RefusedBanner).
  */
 function SharedSaveState({ collab, saving, saveError, project }: { collab: CollabState; saving: State['saving']; saveError: string | null; project: string }) {
   const { pending, link, device, unkept } = collab;
+  if (link === 'refused')
+    return (
+      <span className="save-state error" title={saveError ?? undefined}>
+        <span>
+          共同編集先に送れません
+          <small>{device === 'saved' ? '本端末に保存済み' : `閉じると未送信の ${pending} 件が失われます`}</small>
+        </span>
+      </span>
+    );
   if (collab.role === 'viewer')
     return (
       <span className="save-state viewer" title={`共有中の案件「${project}」`}>

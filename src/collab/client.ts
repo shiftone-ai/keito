@@ -7,7 +7,8 @@ import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, dele
 import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
-import { type Refusal, type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
+import { type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
+import { type LinkRefusal, refusalOf, refusalText } from './refusals';
 
 /** Where a shared project is, and the credential that lets this client in. */
 export interface SharedJoin {
@@ -18,17 +19,12 @@ export interface SharedJoin {
 }
 
 /**
- * Why the link is 'refused': a refusal of the server (see protocol.ts; `deleted` and `revoked` also
- * while connected), or `unreachable`, no server answered.
- */
-export type LinkRefusal = Refusal | 'unreachable';
-
-/**
  * How this client stands with the server. `role`: what the server let this client in to do, null until
  * it has said (the project opened from the copy kept on this device, offline); `pending`: edits made
- * here and not yet confirmed stored; `failure`: why the last store failed (they are sent again);
- * `refusal`: why the link is 'refused'. `device`: whether the project is kept on this device as this
- * page holds it (see kept.ts), and `deviceFailure`, why not while it is 'failed'.
+ * here and not yet confirmed stored (once 'refused', never to be); `failure`: why the last store
+ * failed (they are sent again); `refusal`: why the link is 'refused'. `device`: whether the project
+ * is kept on this device as this page holds it (see kept.ts), and `deviceFailure`, why not while it
+ * is 'failed'.
  */
 export interface ShareStatus {
   link: 'connecting' | 'online' | 'offline' | 'refused';
@@ -39,20 +35,6 @@ export interface ShareStatus {
   device: DeviceState;
   deviceFailure: string | null;
 }
-
-/** What the user is told when the project cannot be opened (or is left), by the reason it was turned away. */
-const REFUSALS: Record<LinkRefusal, string> = {
-  deleted: 'この共有案件は削除されています',
-  revoked: 'この共有案件への招待は取り消されました',
-  schema: 'この版の keito では開けない共有案件です',
-  unreachable: '共同編集先に接続できません（サーバーが動いているか、参加リンクのアドレスが正しいかを確かめてください）',
-  'no-access': '共有案件に接続できません（参加の権限がないか、案件がありません）',
-};
-/** What the user is told of a link 'refused' for this reason. */
-export const refusalText = (refusal: LinkRefusal): string => REFUSALS[refusal];
-
-// A reason this version does not know (an older or newer server's) is told as the general one.
-const refusalOf = (reason: string): LinkRefusal => (Object.hasOwn(REFUSALS, reason) ? (reason as LinkRefusal) : 'no-access');
 
 /** A Yjs update failing to store is tried again after these waits, the last one repeated. */
 const RETRY_MS = [2_000, 5_000, 10_000, 30_000];
@@ -72,7 +54,9 @@ export interface Steps {
  * The project is kept on `device` as it changes, its unconfirmed edits included (see kept.ts). A
  * project kept there, which the server last let this device edit, opens from there before the server
  * answers, or without it while offline; its unconfirmed edits are sent once the server has let this
- * client in again. Any other project opens only from the server.
+ * client in again as an editor. Turned away (by the server, now or when last asked) with edits not
+ * sent, the project stays as this device holds it, 'refused', never sending them, until `discard`:
+ * the user takes them out or lets them go. Any other project opens only from the server.
  */
 export function joinProject(join: SharedJoin, device: DeviceStore | null = null) {
   const ydoc = new Y.Doc();
@@ -122,8 +106,11 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
         }
       }, fromDevice);
       joined = true;
+      // Not asked again: the server let nothing of it in, and answering now it would not say what to do with the edits it turned away.
+      if (!kept.editable) [status.link, status.refusal] = ['refused', kept.refusal ?? 'no-access'];
       settle.resolve();
       notify();
+      if (!kept.editable) return;
     }
     provider = connect();
   }
@@ -157,6 +144,8 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
       if (role) return admit(role);
       const answer = readAnswer(payload);
       if (closed || !answer || !pending.has(answer.op)) return;
+      // Not kept to send again: the server would turn it away each time.
+      if (answer.type === 'refused') return refuse(answer.reason);
       if (answer.type === 'saved') {
         pending.delete(answer.op);
         copy.confirmed(answer.op);
@@ -166,7 +155,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
         }
       } else {
         status.failure = answer.reason;
-        if (answer.type === 'failed') retryLater();
+        retryLater();
       }
       notify();
     },
@@ -176,22 +165,25 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     if (closed || status.link === 'refused') return;
     status.link = 'refused';
     status.refusal = refusalOf(reason);
-    settle.reject(new Error(REFUSALS[status.refusal]));
+    settle.reject(new Error(refusalText(status.refusal)));
+    clearTimeout(retryTimer);
     provider?.destroy();
-    // Not before the project is on screen: this page holds nothing of it, and the copy so marked would keep this device from keeping one once let in.
-    if (joined) copy.refused();
+    // Not before the project is on screen: this page holds nothing of it.
+    if (joined) copy.refused(status.refusal);
     notify();
   }
 
   /**
    * The server let this client in with `role`. A viewer's copy kept on this device is kept as one the
-   * server turned away (see kept.ts): it opens no more, and its unconfirmed edits, made while the
-   * server let this device edit, are never sent under the viewer's invite.
+   * server turned away (see kept.ts): it does not open as editable again, and its unconfirmed edits,
+   * made while the server let this device edit, are never sent under the viewer's invite. Holding
+   * such edits, the client is turned away 'read-only': they stay on screen, to be taken out.
    */
   function admit(role: Role): void {
     if (closed || status.role === role) return;
     status.role = role;
-    if (role === 'viewer') copy.refused();
+    if (role === 'viewer' && pending.size) return refuse('read-only');
+    if (role === 'viewer') copy.refused('read-only');
     notify();
   }
 
@@ -202,7 +194,8 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
   const editing = (): boolean => !closed && status.link !== 'refused' && status.role !== 'viewer';
 
   function send(op: string, update: Uint8Array): void {
-    if (editing() && status.link === 'online') provider?.sendStateless(writeCommit(op, update));
+    // Not while the role is unknown: an edit kept on this device goes out only once the server has said, on this connection, that this client edits.
+    if (!closed && status.link === 'online' && status.role === 'editor') provider?.sendStateless(writeCommit(op, update));
   }
 
   /** Send every unconfirmed edit again, oldest first (the server stores each op id once). */
@@ -301,6 +294,11 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     renameProject(title: string): void {
       if (editing()) renameProject(ydoc, title, manage);
     },
+    /**
+     * Take the copy the server turned away off this device: its unsent edits have been taken out, or
+     * the user lets them go. This page keeps nothing of the project after.
+     */
+    discard: (): Promise<void> => copy.discard(),
     /** Send unconfirmed edits now rather than at the next retry, and keep the project on this device again if that failed. */
     retry(): void {
       retries = 0;
