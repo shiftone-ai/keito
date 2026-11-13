@@ -1102,6 +1102,7 @@ td.empty {
   gap: 4px;
   color: var(--ink);
   font-weight: 600;
+  white-space: nowrap;
 }
 .save-state.error {
   /* Not left inline: the button would drop below a two-line state and push the board down. */

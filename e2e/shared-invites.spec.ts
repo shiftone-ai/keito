@@ -58,6 +58,10 @@ test("a viewer sees an editor's move as it is made, cannot move the shape itself
   await expect(v.locator('.save-state')).toHaveText('閲覧のみ');
   await expect(a.locator('.save-state')).toHaveText('共同編集先に保存済み');
   await expect(v.locator('.toolbar button[aria-label="四角"]')).toHaveCount(0);
+  // Nothing to put on the board is offered either (the editor's toolbar has both).
+  const placing = '.toolbar button[aria-label="凡例を置く"], .toolbar button[aria-label$="ライブラリ"]';
+  await expect(a.locator(placing)).toHaveCount(2);
+  await expect(v.locator(placing)).toHaveCount(0);
 
   await dragShape(a, 220, 140);
   await expect(a.locator('.save-state')).toHaveText('共同編集先に保存済み');
@@ -71,6 +75,9 @@ test("a viewer sees an editor's move as it is made, cannot move the shape itself
   await expect(v.locator('.inspector fieldset:disabled')).toHaveCount(1);
   await expect(v.locator('.inspector')).toContainText('閲覧のみの招待では編集できません');
   await expect(v.locator('.quickbar')).toHaveCount(0);
+  await shape(v).click({ button: 'right' });
+  for (const label of ['切り取り', '削除']) await expect(v.locator('.context-menu button', { hasText: label })).toBeDisabled();
+  await v.keyboard.press('Escape');
 
   administer(data, (store) => store.revokeGrant(viewer.id));
   await expect.poll(() => told.join('\n')).toMatch(/招待は取り消されました/);
