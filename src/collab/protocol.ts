@@ -8,9 +8,13 @@
  * has already stored is answered `saved` again without being stored twice. `failed` says the store
  * failed (the client sends it again later); `refused` says the edit cannot be read.
  *
- * The server tells every client of a project when the project is deleted (`deleted`), answering an
- * edit sent to it or unasked: the edit is not stored, and the client leaves the project, as it would
- * on being turned away for that reason when connecting.
+ * The server tells every client of a project when the project is deleted (`deleted`), and the clients
+ * of an invite when it is revoked (`revoked`), answering an edit sent to it or unasked: the edit is
+ * not stored, and the client leaves the project, as it would on being turned away for that reason
+ * when connecting.
+ *
+ * Once it lets a client in, the server tells it what its invite lets it do (`access`), before it
+ * answers the client's first sync: a viewer's commits are refused (`read-only`).
  */
 export interface Commit {
   type: 'commit';
@@ -21,13 +25,20 @@ export type Answer = { type: 'saved'; op: string } | { type: 'failed'; op: strin
 
 /**
  * Why the server turns a client away, sent as the reason of the provider's authenticationFailed event:
- * `deleted`, the project has been deleted; `schema`, the project is of a form the client does not
- * read; `no-access`, anything else (no grant for the project, or no such project: a client without a
- * grant is not told which).
+ * `deleted`, the project has been deleted; `revoked`, the client's invite has been revoked; `schema`,
+ * the project is of a form the client does not read; `no-access`, anything else (no invite for the
+ * project, or no such project: a client without an invite is not told which).
  */
-export type Refusal = 'deleted' | 'schema' | 'no-access';
+export type Refusal = 'deleted' | 'revoked' | 'schema' | 'no-access';
 
-/** What a client presents on connecting: the grant's secret, and the schema it reads and writes. */
+/** What an invite lets its holder do with its project: see it as it changes, or edit it too. */
+export type Role = 'viewer' | 'editor';
+export const isRole = (v: unknown): v is Role => v === 'viewer' || v === 'editor';
+
+/** Why the server lets go of a client while it is connected. */
+export type LetGo = Extract<Refusal, 'deleted' | 'revoked'>;
+
+/** What a client presents on connecting: the invite's secret, and the schema it reads and writes. */
 export interface Credential {
   token: string;
   schema: number;
@@ -78,10 +89,21 @@ export function readAnswer(text: string): Answer | null {
   return null;
 }
 
-export const writeDeleted = (): string => JSON.stringify({ type: 'deleted' });
+export const writeLetGo = (why: LetGo): string => JSON.stringify({ type: why });
 
-/** Whether a message from the server says the project has been deleted. */
-export const readDeleted = (text: string): boolean => parse(text)?.type === 'deleted';
+/** Why a message from the server lets go of this client, or null for a message that does not. */
+export function readLetGo(text: string): LetGo | null {
+  const type = parse(text)?.type;
+  return type === 'deleted' || type === 'revoked' ? type : null;
+}
+
+export const writeAccess = (role: Role): string => JSON.stringify({ type: 'access', role });
+
+/** The role a message from the server says this client was let in with, or null for any other message. */
+export function readAccess(text: string): Role | null {
+  const v = parse(text);
+  return v?.type === 'access' && isRole(v.role) ? v.role : null;
+}
 
 export const writeCredential = (credential: Credential): string => JSON.stringify(credential);
 

@@ -7,8 +7,9 @@ import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
 import type { LinkRefusal, SharedProject } from './client';
 import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
+import { VIEW_ONLY } from './role';
 import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
-import { sharedTabs } from './tabs';
+import { type BoardManagement, sharedTabs } from './tabs';
 import { validDrawing } from './valid';
 
 /** Said when the shared project on screen, having no board, is asked for an edit. */
@@ -49,7 +50,7 @@ export interface SharedTarget extends Target {
  * collaboration server stores them, and `saving` says whether it has. It holds nothing of this
  * machine's store: the board can neither be written there nor take part in what is kept there
  * (history, other boards, pictures). Which of the project's boards is on screen, and managing them,
- * is tabs.ts's.
+ * is tabs.ts's. A viewer (see ShareStatus.role) looks round and takes no edit.
  */
 export function sharedTarget(projectId: string, project: SharedProject, host: Host): SharedTarget {
   /** The board of the project on screen (see put); '' for none, the project having no board. */
@@ -64,7 +65,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   let switching = false;
   /** Set once the server has turned this page away: the session is leaving the project. */
   let leaving = false;
-  const takes = (what: EditKind): boolean => (board ? sharedTakes(what) : emptyTakes(what));
+  const viewer = (): boolean => project.status().role === 'viewer';
+  const takes = (what: EditKind): boolean => (board && !viewer() ? sharedTakes(what) : emptyTakes(what));
   const tabs = sharedTabs(projectId, project, {
     shown: () => board,
     put,
@@ -73,6 +75,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     say: host.say,
   });
   const stop = project.listen(refresh);
+  /** Managing the boards as a viewer is offered it: each asked for is refused, as the server would. */
+  const viewOnly: BoardManagement = { add: host.refuse, rename: host.refuse, restore: host.refuse, renameProject: host.refuse };
 
   /** What is on screen while the project has no board: nothing, under the project's name. */
   function noBoard(): Doc {
@@ -87,7 +91,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     const s = project.status();
     const unkept = s.pending > 0 && s.device === 'failed';
     return {
-      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: tabs.manage },
+      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: viewer() ? viewOnly : tabs.manage },
       saving: s.failure || unkept ? 'error' : s.pending ? 'saving' : 'saved',
       saveError: unkept ? s.deviceFailure : s.failure,
     };
@@ -164,7 +168,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     edits: {
       takes,
       edit(next, record) {
-        if (!board) return host.refuse();
+        if (!board || viewer()) return host.refuse();
         const edit = editBetween(host.get().doc, next);
         if (!edit) return host.refuse();
         if (isNoEdit(edit)) return;
@@ -217,10 +221,18 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       // What fails in this machine's store says nothing of what the server has stored.
       failed: () => {},
     },
-    boards: tabs.boards,
+    boards: {
+      ...tabs.boards,
+      remove(id) {
+        if (!viewer()) return tabs.boards.remove(id);
+        const shared = [...project.boards(), ...project.deletedBoards()].some((b) => b.id === id);
+        if (shared) host.refuse();
+        return shared;
+      },
+    },
     local: null,
     get refusal() {
-      return board ? NOT_TAKEN : NO_BOARD;
+      return viewer() ? VIEW_ONLY : board ? NOT_TAKEN : NO_BOARD;
     },
     start: tabs.start,
     close() {

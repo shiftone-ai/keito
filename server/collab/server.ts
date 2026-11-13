@@ -1,45 +1,63 @@
-import { type Document, type Hocuspocus, Server } from '@hocuspocus/server';
+import { type Connection, type Hocuspocus, Server } from '@hocuspocus/server';
+import { messageYjsSyncStep1 } from 'y-protocols/sync';
 import * as Y from 'yjs';
-import { type Answer, type Refusal, readCommit, readCredential, writeAnswer, writeDeleted } from '../../src/collab/protocol';
+import { type Answer, type LetGo, type Role, readCommit, readCredential, writeAccess, writeAnswer, writeLetGo } from '../../src/collab/protocol';
+import { type Denial, authenticate, authorize } from './access';
 import type { CollabStore } from './store';
 
 /**
  * A refusal the provider receives as the reason of its authenticationFailed event. Its message is
  * left empty: Hocuspocus logs a hook's error with its stack whenever it has one.
  */
-function refusal(documentName: string, reason: Refusal | 'not-initialized'): Error & { reason: string } {
+function refusal(documentName: string, reason: Denial | 'schema' | 'not-initialized'): Error & { reason: string } {
   console.warn(`[keito-collab] ${documentName}: connection refused (${reason})`);
   return Object.assign(new Error(), { reason });
 }
 
-/** How often the open projects are looked up for a delete made by another process (the administration commands). */
+/** What a connection was let in by (see onAuthenticate): the invite, checked again on each commit and every WATCH_MS, and its role. */
+interface Admitted {
+  invite: string;
+  role: Role;
+}
+const admitted = (connection: Connection): Admitted => connection.context as Admitted;
+
+/** How often the open projects are looked up for a delete or a revoke made by another process (the administration commands). */
 const WATCH_MS = 1_000;
 
-/** Tell every client of a deleted project so, and close their connections. */
-function closeDeleted(document: Document): void {
-  console.warn(`[keito-collab] ${document.name}: deleted, its clients let go`);
-  document.broadcastStateless(writeDeleted());
-  for (const connection of document.getConnections()) connection.close();
+/** Why a client is let go for a denial of its access ('read-only' is no reason to let one go). */
+// A grant is never taken out of the store: what else ends one's access is its revoke.
+const letGoFor = (denial: Denial): LetGo => (denial === 'deleted' ? 'deleted' : 'revoked');
+
+/** Tell a client why it is let go, and close its connection. */
+function letGo(connection: Connection, why: LetGo): void {
+  console.warn(`[keito-collab] ${connection.document.name}: ${why}, client of invite ${admitted(connection).invite} let go`);
+  connection.sendStateless(writeLetGo(why));
+  connection.close();
 }
 
 /**
- * Let go of the clients of every open project deleted by another process (`delete` of cli.ts),
- * looked up every WATCH_MS. Returns what stops the watch.
+ * Let go of every client of an open project whose invite no longer lets it see the project (revoked,
+ * or the project deleted by another process), looked up every WATCH_MS. Returns what stops the watch.
  */
-function watchDeleted(hocuspocus: Hocuspocus, store: CollabStore): () => void {
+function watchAccess(hocuspocus: Hocuspocus, store: CollabStore): () => void {
   const timer = setInterval(() => {
-    // A project left open with no clients, until Hocuspocus unloads it, has nobody to tell.
-    for (const document of hocuspocus.documents.values()) if (document.getConnectionsCount() && store.isDeleted(document.name)) closeDeleted(document);
+    for (const document of hocuspocus.documents.values()) {
+      for (const connection of document.getConnections()) {
+        const access = authorize(store, admitted(connection).invite, document.name, 'view');
+        if (!access.ok) letGo(connection, letGoFor(access.denial));
+      }
+    }
   }, WATCH_MS);
   return () => clearInterval(timer);
 }
 
 /**
- * The collaboration server: Hocuspocus over the store. A connection is let in to one project by a
- * grant for that project (the project id alone is not enough), only while the project is not
- * deleted, and only a client of the project's schema. Edits reach the project only as commits (see
- * src/collab/protocol.ts), answered once stored. A project deleted while open has its clients let go
- * (see watchDeleted).
+ * The collaboration server: Hocuspocus over the store. A connection is let in to one project by an
+ * invite for that project (the project id alone is not enough; see access.ts), only while the invite
+ * is not revoked and the project not deleted, and only a client of the project's schema. Edits reach
+ * the project only as commits of an editor (see src/collab/protocol.ts), answered once stored. A
+ * client whose invite is revoked, or whose project is deleted, while connected is let go (see
+ * watchAccess).
  */
 export function collabServer(store: CollabStore, options: { port: number; address?: string }): Server {
   let unwatch = (): void => {};
@@ -50,15 +68,19 @@ export function collabServer(store: CollabStore, options: { port: number; addres
     // The process stops on SIGINT/SIGTERM after storing what it holds (see cli.ts).
     stopOnSignals: false,
 
-    async onAuthenticate({ token, documentName, connectionConfig }) {
+    async onAuthenticate({ token, documentName, connectionConfig }): Promise<Admitted> {
       const credential = readCredential(token);
-      const schema = store.projectSchema(documentName);
-      if (!credential || schema === null || store.grantedProject(credential.token) !== documentName) throw refusal(documentName, 'no-access');
-      // Told only to a holder of a grant for the project.
-      if (store.isDeleted(documentName)) throw refusal(documentName, 'deleted');
-      if (credential.schema !== schema) throw refusal(documentName, 'schema');
+      const access = authorize(store, credential && authenticate(store, credential.token), documentName, 'view');
+      if (!access.ok) throw refusal(documentName, access.denial);
+      if (credential?.schema !== store.projectSchema(documentName)) throw refusal(documentName, 'schema');
       // Read-only for Yjs's own sync: an edit it carried would be in the project before it is stored.
       connectionConfig.readOnly = true;
+      return { invite: access.invite, role: access.role };
+    },
+
+    async beforeSync({ connection, type }) {
+      // Ahead of the answer to the client's sync: it knows what it may do by the time it has the project.
+      if (type === messageYjsSyncStep1) connection.sendStateless(writeAccess(admitted(connection).role));
     },
 
     async onLoadDocument({ documentName }) {
@@ -80,13 +102,21 @@ export function collabServer(store: CollabStore, options: { port: number; addres
       } finally {
         probe.destroy();
       }
+      let stored;
       try {
-        if (store.commit(documentName, commit.op, commit.update) === 'deleted') return closeDeleted(document);
+        // Checked as the edit is stored, not as the client was let in: an invite revoked since lets nothing more in.
+        stored = store.commit(documentName, commit.op, commit.update, () => {
+          const access = authorize(store, admitted(connection).invite, documentName, 'edit');
+          return access.ok ? null : access.denial;
+        });
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         console.error(`[keito-collab] ${documentName}: edit ${commit.op} not stored: ${reason}`);
         return answer({ type: 'failed', op: commit.op, reason });
       }
+      if (stored === 'read-only') return answer({ type: 'refused', op: commit.op, reason: stored });
+      if (stored === 'deleted') return document.getConnections().forEach((c) => letGo(c, 'deleted'));
+      if (stored !== 'stored' && stored !== 'known') return letGo(connection, letGoFor(stored));
       // Not applied before it is stored: another editor would see it, and an edit made over it
       // would be stored without it, which the project could not take in after a restart.
       Y.applyUpdate(document, commit.update, { source: 'local' });
@@ -98,7 +128,7 @@ export function collabServer(store: CollabStore, options: { port: number; addres
     },
 
     async onListen() {
-      unwatch = watchDeleted(server.hocuspocus, store);
+      unwatch = watchAccess(server.hocuspocus, store);
     },
 
     async onDestroy() {

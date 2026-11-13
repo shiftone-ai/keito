@@ -2,16 +2,19 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import * as Y from 'yjs';
 import { type ProjectSeed, SCHEMA, seedProject } from '../../src/collab/model';
+import type { Role } from '../../src/collab/protocol';
 import type { Doc } from '../../src/model/types';
 
 const digest = (token: string): string => createHash('sha256').update(token).digest('hex');
+const roleOf = (stored: unknown): Role => (stored === 'viewer' ? 'viewer' : 'editor');
 
 /**
  * The collaboration server's SQLite file. A project's Yjs state is the binary as last compacted plus
  * the edits stored since, each under the op id it was committed with. A project exists only once it
  * has been initialized (`initProject`): an empty or unknown document is never taken for a new one.
  * A deleted project keeps its row and its state, marked `deleted_at`, until it is restored.
- * Grants keep only the hash of their secret.
+ * A grant is an invite to one project, with its role: it keeps only the hash of its secret, and stays,
+ * marked `revoked_at`, once revoked.
  */
 export function openStore(file: string) {
   // A write the server waits on is answered within the timeout or fails: the server answers the
@@ -42,12 +45,20 @@ export function openStore(file: string) {
       id TEXT PRIMARY KEY,
       project TEXT NOT NULL REFERENCES projects(id),
       token_hash TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'editor',
+      revoked_at TEXT
     );
   `);
 
-  // CREATE TABLE IF NOT EXISTS leaves a table made before projects could be deleted without the column.
-  if (!db.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get('projects', 'deleted_at')) db.exec('ALTER TABLE projects ADD COLUMN deleted_at TEXT');
+  // CREATE TABLE IF NOT EXISTS leaves a table made before a column was added without it.
+  const addColumn = (table: string, column: string, type: string): void => {
+    if (!db.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  };
+  addColumn('projects', 'deleted_at', 'TEXT');
+  // Grants made before there were viewers were editors'.
+  addColumn('grants', 'role', "TEXT NOT NULL DEFAULT 'editor'");
+  addColumn('grants', 'revoked_at', 'TEXT');
 
   function inTransaction<T>(fn: () => T): T {
     db.exec('BEGIN IMMEDIATE');
@@ -66,8 +77,11 @@ export function openStore(file: string) {
   const isDeleted = (id: string): boolean => !!sql.deletedAt.get(id)?.deleted_at;
   const sql = {
     addProject: db.prepare('INSERT INTO projects (id, schema, initialized_at, state) VALUES (?, ?, ?, ?)'),
-    addGrant: db.prepare('INSERT INTO grants (id, project, token_hash, created_at) VALUES (?, ?, ?, ?)'),
-    grant: db.prepare('SELECT project FROM grants WHERE token_hash = ?'),
+    addGrant: db.prepare('INSERT INTO grants (id, project, token_hash, created_at, role) VALUES (?, ?, ?, ?, ?)'),
+    grantOf: db.prepare('SELECT id FROM grants WHERE token_hash = ?'),
+    grant: db.prepare('SELECT project, role, revoked_at FROM grants WHERE id = ?'),
+    grants: db.prepare('SELECT id, role, created_at, revoked_at FROM grants WHERE project = ? ORDER BY created_at, id'),
+    revoke: db.prepare('UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL'),
     schema: db.prepare('SELECT schema FROM projects WHERE id = ?'),
     deletedAt: db.prepare('SELECT deleted_at FROM projects WHERE id = ?'),
     markDeleted: db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'),
@@ -96,18 +110,34 @@ export function openStore(file: string) {
       return seed;
     },
 
-    /** A new editor's credential for a project; the secret is returned this once and kept only as a hash. */
-    addGrant(project: string): { id: string; token: string } {
+    /** A new invite to a project (an editor's unless `role` says); the secret is returned this once and kept only as a hash. */
+    addGrant(project: string, role: Role = 'editor'): { id: string; token: string } {
       const id = randomUUID();
       const token = randomBytes(32).toString('base64url');
-      sql.addGrant.run(id, project, digest(token), now());
+      sql.addGrant.run(id, project, digest(token), now(), role);
       return { id, token };
     },
 
-    /** The project a credential lets its holder edit, or null for no grant. */
-    grantedProject(token: string): string | null {
-      const row = sql.grant.get(digest(token));
-      return row ? String(row.project) : null;
+    /** The id of the grant whose secret this is, revoked or not; null for none. */
+    grantOf(token: string): string | null {
+      const row = sql.grantOf.get(digest(token));
+      return row ? String(row.id) : null;
+    },
+
+    /** A grant as it stands now; null for none of that id. */
+    grant(id: string): { project: string; role: Role; revoked: boolean } | null {
+      const row = sql.grant.get(id);
+      return row ? { project: String(row.project), role: roleOf(row.role), revoked: !!row.revoked_at } : null;
+    },
+
+    /** A project's grants, oldest first, the revoked ones included. */
+    grants(project: string): { id: string; role: Role; created: string; revoked: string | null }[] {
+      return sql.grants.all(project).map((r) => ({ id: String(r.id), role: roleOf(r.role), created: String(r.created_at), revoked: r.revoked_at ? String(r.revoked_at) : null }));
+    },
+
+    /** Revoke a grant for good: its secret no longer lets anyone in. False when there is no such grant not yet revoked. */
+    revokeGrant(id: string): boolean {
+      return sql.revoke.run(now(), id).changes > 0;
     },
 
     /** The schema a project's Yjs state is written in, or null for a project never initialized. */
@@ -139,9 +169,15 @@ export function openStore(file: string) {
       return Y.mergeUpdates([row.state as Uint8Array, ...edits]);
     },
 
-    /** Store a committed edit once: 'known' when this op id was stored before, 'deleted' (not stored) for a deleted project. */
-    commit(project: string, op: string, update: Uint8Array): 'stored' | 'known' | 'deleted' {
+    /**
+     * Store a committed edit once: 'known' when this op id was stored before, 'deleted' (not stored) for
+     * a deleted project. `refusal`, run in the same transaction as the write (no revoke comes between),
+     * says why the edit may not be stored, if it may not: it is then returned, and nothing stored.
+     */
+    commit<R extends string>(project: string, op: string, update: Uint8Array, refusal: () => R | null = () => null): 'stored' | 'known' | 'deleted' | R {
       return inTransaction(() => {
+        const refused = refusal();
+        if (refused) return refused;
         if (isDeleted(project)) return 'deleted';
         if (sql.known.get(project, op)) return 'known';
         sql.addEdit.run(project, update);

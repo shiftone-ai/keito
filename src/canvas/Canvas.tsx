@@ -8,6 +8,7 @@ import { type CreateKind, makeEdge, makeImage, makeNode } from '../model/presets
 import { SEQUENCE_SAMPLE, seqLayout, seqScale } from '../model/sequence';
 import { STRONG } from '../model/signals';
 import { kindOf } from '../model/kinds';
+import { VIEW_ONLY, lookingOnly } from '../collab/role';
 import { NOT_TAKEN } from '../collab/scope';
 import { type Placing, duplicateInPlace, say, storeImage, takesIn, useStore } from '../model/store';
 import { type Doc, type EdgeEnd, type Node, type Pt, type Rect, hasText } from '../model/types';
@@ -19,7 +20,7 @@ import { openBoards } from '../ui/Boards';
 import { EmptyProject } from '../ui/SharedBoards';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
-import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, canConnect, endDrag, lostTarget, st } from './drag';
+import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, callOff, canConnect, endDrag, lostTarget, st } from './drag';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
 
@@ -141,7 +142,7 @@ export function insertNode(kind: CreateKind, at?: Pt, rect?: Rect): string {
 export function insertText(text: string): void {
   const s = st();
   if (!kindOf(s.doc).tools.includes('text')) return;
-  if (!takesIn(s)('text')) return say(NOT_TAKEN);
+  if (!takesIn(s)('text')) return say(lookingOnly(s) ? VIEW_ONLY : NOT_TAKEN);
   const p = viewCenter();
   const n = makeNode('text', snap(p.x), snap(p.y), allIds(s.doc), text);
   n.h = Math.max(n.h, textHeightFor(n, text));
@@ -239,7 +240,7 @@ function neededHeight(n: Node, text: string): number | null {
 }
 
 export function Canvas() {
-  const viewing = useStore((s) => !!s.viewing);
+  const looking = useStore(lookingOnly);
   const svgRef = useRef<SVGSVGElement>(null);
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
@@ -260,6 +261,8 @@ export function Canvas() {
   const [busy, setBusy] = useState(false);
   const [space, setSpace] = useState(false);
   const drag = useRef<Drag | null>(null);
+  /** What was selected as the drag under way began, selected again if it is called off. */
+  const selectedAtStart = useRef<string[]>([]);
   /** The plan last shown, kept while the target stays the same so its routes are not worked out again. */
   const lastPlan = useRef<Plan | null>(null);
   const keepPlan = (plan: Plan | null): Plan | null => {
@@ -276,6 +279,7 @@ export function Canvas() {
   };
   const begin = (e: RPointerEvent, d: Drag) => {
     drag.current = d;
+    selectedAtStart.current = st().selection;
     gesture = true;
     setBusy(true);
     try {
@@ -428,9 +432,9 @@ export function Canvas() {
       return what.place(p);
     }
     // A box tool: a click puts one there, a drag draws it out to the size wanted.
-    if (placesBox(tool) && !st().viewing) return begin(e, { kind: 'place', start: p });
+    if (placesBox(tool) && !lookingOnly(st())) return begin(e, { kind: 'place', start: p });
     // Double-click on empty canvas drops a box and starts typing, like a whiteboard.
-    if (doubleClick(e, 'canvas') && !st().viewing) return dropBox(p);
+    if (doubleClick(e, 'canvas') && !lookingOnly(st())) return dropBox(p);
     const base = e.shiftKey ? st().selection : [];
     st().select(base);
     begin(e, { kind: 'marquee', start: p, base });
@@ -441,8 +445,8 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    // On an old state, a click shows what it was (in the panel), and nothing moves.
-    if (s.viewing) return s.select(e.shiftKey ? (s.selection.includes(n.id) ? s.selection.filter((id) => id !== n.id) : [...s.selection, n.id]) : [n.id]);
+    // On an old state, or as a viewer, a click shows what it is (in the panel), and nothing moves.
+    if (lookingOnly(s)) return s.select(e.shiftKey ? (s.selection.includes(n.id) ? s.selection.filter((id) => id !== n.id) : [...s.selection, n.id]) : [n.id]);
     if (doubleClick(e, n.id) && hasText(n)) {
       // Double-clicking the body of an area frame adds a box there; its title strip renames it.
       const p = world(e);
@@ -493,7 +497,7 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    if (doubleClick(e, id) && !s.viewing) {
+    if (doubleClick(e, id) && !lookingOnly(s)) {
       s.select([id]);
       s.setEditing(id);
       return;
@@ -504,7 +508,7 @@ export function Canvas() {
 
   const onDoubleClick = (e: RMouseEvent) => {
     const s = st();
-    if (s.editing || tool !== 'select' || s.viewing) return;
+    if (s.editing || tool !== 'select' || lookingOnly(s)) return;
     const p = world(e);
     const n = nodeAt(s.doc, p);
     const tol = 8 / s.view.k;
@@ -522,13 +526,13 @@ export function Canvas() {
     if (e.button !== 0 || tool !== 'select' || space || st().placing) return;
     e.stopPropagation();
     const s = st();
-    if (doubleClick(e, id) && !s.viewing) {
+    if (doubleClick(e, id) && !lookingOnly(s)) {
       s.select([id]);
       s.setEditing(id);
       return;
     }
     s.select(e.shiftKey ? (s.selection.includes(id) ? s.selection.filter((x) => x !== id) : [...s.selection, id]) : [id]);
-    if (!s.viewing) begin(e, { kind: 'label', id, start: world(e), moved: false });
+    if (!lookingOnly(s)) begin(e, { kind: 'label', id, start: world(e), moved: false });
   };
 
   const onSegmentDown = (e: RPointerEvent, id: string, seg: number, horizontal: boolean, route: Pt[]) => {
@@ -708,7 +712,7 @@ export function Canvas() {
       if (d.kind === 'move' && d.dup) {
         // The copies take the originals' places in the drag (in the same undo step).
         const map = duplicateInPlace(s.selection.filter((id) => s.doc.nodes.some((n) => n.id === id)));
-        // No copies made (a shared board takes none yet): moving the originals instead is not what was asked.
+        // No copies made (a board that takes none): moving the originals instead is not what was asked.
         if (!map.size) return onCancel();
         d.orig = new Map([...d.orig].map(([id, q]) => [map.get(id) ?? id, q]));
         d.routes = new Map([...d.routes].map(([id, r]) => [map.get(id) ?? id, r]));
@@ -786,32 +790,47 @@ export function Canvas() {
     s.updateNode(d.id, { x, y, w, h }, false);
   };
 
-  /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
-  const onCancel = () => {
-    endDrag(drag.current);
+  /** Let go of the gesture under way: the drag, and what it shows. */
+  const release = () => {
+    const d = drag.current;
     drag.current = null;
     gesture = false;
     lastPlan.current = null;
     setGhost(null);
     setGuides({});
     setBusy(false);
-  };
-
-  const onUp = (e: RPointerEvent) => {
-    const d = drag.current;
-    drag.current = null;
-    gesture = false;
-    setGhost(null);
-    lastPlan.current = null;
-    // The pointer was held by the canvas, so the box it left from never heard it go: its dots
+    // The pointer was held by the canvas, so the box a line left from never heard it go: its dots
     // would stay lit. They come back as soon as the pointer moves onto a box again.
     if (d?.kind === 'connect' || d?.kind === 'reconnect') {
       setHoverSide(null);
       setHover(null);
-      setHush(nodeAt(st().doc, world(e))?.id ?? null);
     }
-    setGuides({});
-    setBusy(false);
+  };
+
+  /** A gesture the system called off (a touch taken over, the pointer lost): it ends where it is, making nothing. */
+  const onCancel = () => {
+    endDrag(drag.current);
+    release();
+  };
+
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => {
+      const d = drag.current;
+      if (e.key !== 'Escape' || e.isComposing || !d) return;
+      // Caught before the page's keys: those would let go of the selection as well.
+      e.stopPropagation();
+      e.preventDefault();
+      release();
+      callOff(d, selectedAtStart.current);
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, []);
+
+  const onUp = (e: RPointerEvent) => {
+    const d = drag.current;
+    release();
+    if (d?.kind === 'connect' || d?.kind === 'reconnect') setHush(nodeAt(st().doc, world(e))?.id ?? null);
     // Checked here too, not only as the pointer moves: let go without moving after the take-off, it would make a line to what is gone.
     if (d && lostTarget(st().doc, d)) return endDrag(d);
     if (d?.kind !== 'segment') endDrag(d);
@@ -877,8 +896,8 @@ export function Canvas() {
   const selectedEdge = selection.length === 1 ? doc.edges.find((e) => e.id === selection[0]) : undefined;
   const handleNode = doc.nodes.find((n) => n.id === hover && n.id !== hush && hasHandles(n)) ?? (single && hasHandles(single) ? single : undefined);
   const hs = 8 / view.k;
-  // Hidden rather than refused when used: an old state from the history is only looked at.
-  const idle = tool === 'select' && !editing && !busy && !viewing;
+  // Hidden rather than refused when used: an old state from the history, or a viewer's board, is only looked at.
+  const idle = tool === 'select' && !editing && !busy && !looking;
   const cursor = space || tool === 'pan' ? 'grab' : tool === 'select' && !placing ? 'default' : 'crosshair';
   // What waits to be placed, outlined under the pointer: a library item, or the box an armed tool makes.
   const waiting = placing ? { label: placing.label, size: placing.size } : placesBox(tool) && boxSize(tool) && !busy ? { label: '', size: boxSize(tool)! } : null;
@@ -1066,7 +1085,7 @@ export function Canvas() {
       {/* Keyed by the selection so an open menu never carries over to another object. */}
       {idle && selection.length > 0 && !menuAt && <QuickBar key={selection.join(',')} />}
       {menuAt && <ContextMenu at={menuAt} close={() => setMenuAt(null)} />}
-      {collab && !collab.boards.length ? <EmptyProject collab={collab} add={() => openBoards(true)} /> : doc.nodes.length === 0 && !viewing && !placing && <EmptyHint doc={doc} />}
+      {collab && !collab.boards.length ? <EmptyProject collab={collab} add={() => openBoards(true)} /> : doc.nodes.length === 0 && !looking && !placing && <EmptyHint doc={doc} />}
       {(placing || placesBox(tool)) && !busy && (
         <div className="place-hint">
           {placing ? `「${placing.label}」: 置きたい所をクリック` : tool === 'sequence' ? '置きたい所をクリック' : '置きたい所をクリック、ドラッグで大きさを決めて置く'}
@@ -1117,7 +1136,7 @@ function ImeCatcher({ onSpace }: { onSpace: () => void }) {
   const [converting, setConverting] = useState(false);
   // Shift+1 just pressed: its "！" is not the shape's.
   const bang = useRef(false);
-  const only = useStore((s) => (s.selection.length === 1 && !s.editing && !s.viewing ? s.selection[0] : ''));
+  const only = useStore((s) => (s.selection.length === 1 && !s.editing && !lookingOnly(s) ? s.selection[0] : ''));
   const doc = useStore((s) => s.doc);
   const view = useStore((s) => s.view);
   const panel = useStore((s) => s.panel);

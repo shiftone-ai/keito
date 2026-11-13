@@ -34,6 +34,8 @@ export interface LocalEdits extends Edits {
  */
 export function localEdits(host: EditsHost): LocalEdits {
   const kept = new Map<string, KeptSteps & { print: string }>();
+  /** The redo steps the last operation's beginning cleared, with the steps it left: put back if it is called off. */
+  let cleared: { past: Doc[]; future: Doc[] } | null = null;
   return {
     takes: () => true,
     edit(next, record) {
@@ -42,7 +44,9 @@ export function localEdits(host: EditsHost): LocalEdits {
     },
     begin() {
       const s = host.get();
-      host.set({ past: [...s.past.slice(-HISTORY), s.doc], future: [] });
+      const past = [...s.past.slice(-HISTORY), s.doc];
+      cleared = { past, future: s.future };
+      host.set({ past, future: [] });
     },
     // Nothing waits for the end: each edit is written as it is made (see autosave).
     end: () => {},
@@ -50,7 +54,10 @@ export function localEdits(host: EditsHost): LocalEdits {
       const s = host.get();
       const doc = s.past.at(-1);
       if (!doc) return false;
-      host.set({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), selection: [], editing: null });
+      // Only while the steps are still the ones it left: after an undo or redo since, they belong to that.
+      const future = cleared?.past === s.past ? cleared.future : s.future;
+      cleared = null;
+      host.set({ doc: { ...doc, revisions: s.doc.revisions }, past: s.past.slice(0, -1), future, selection: [], editing: null });
       return true;
     },
     // The board's history list is not part of the drawing: undo takes back drawing, never a kept state.

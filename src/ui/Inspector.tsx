@@ -1,3 +1,4 @@
+import { VIEW_ONLY, lookingOnly } from '../collab/role';
 import { NOT_SHARED_YET } from '../collab/scope';
 import { align, useStore, useTakes } from '../model/store';
 import { Section, Head } from './inspector/fields';
@@ -8,8 +9,9 @@ import { EdgePanel } from './inspector/EdgePanel';
 export function Inspector() {
   const doc = useStore((s) => s.doc);
   const selection = useStore((s) => s.selection);
-  const viewing = useStore((s) => !!s.viewing);
+  const looking = useStore(lookingOnly);
   const collab = useStore((s) => !!s.collab);
+  const viewer = useStore((s) => s.collab?.role === 'viewer');
   // A shared project with no board has nothing to set: what is on screen is no board.
   const noBoard = useStore((s) => !!s.collab && !s.collab.boards.length);
   const takes = useTakes();
@@ -42,11 +44,11 @@ export function Inspector() {
       </>
     );
   }
-  // An old state from the history, on screen, is for looking at: what is selected there is shown, not edited.
-  if (viewing && selection.length > 0)
+  // An old state from the history, or a viewer's board, on screen, is for looking at: what is selected there is shown, not edited.
+  if (looking && selection.length > 0)
     return (
       <aside className="inspector">
-        <p className="hint">履歴の版を表示中は編集できません。編集するには、上の帯で「この時点に戻す」か「現在の図に戻る」を選んでください。</p>
+        <p className="hint">{viewer ? VIEW_ONLY : '履歴の版を表示中は編集できません。編集するには、上の帯で「この時点に戻す」か「現在の図に戻る」を選んでください。'}</p>
         <fieldset className="plain" disabled>
           {body}
         </fieldset>
@@ -54,7 +56,7 @@ export function Inspector() {
     );
   return (
     <aside className="inspector">
-      {collab && <p className="hint">共有中の案件「{doc.meta.project}」のボードです。試験中のため、{NOT_SHARED_YET}は、まだ共有できません。</p>}
+      {collab && <p className="hint">{viewer ? VIEW_ONLY : `共有中の案件「${doc.meta.project}」のボードです。試験中のため、${NOT_SHARED_YET}は、まだ共有できません。`}</p>}
       {!takes('settings') && !selection.length ? (
         <fieldset className="plain" disabled>
           {body}
