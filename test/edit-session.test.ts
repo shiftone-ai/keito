@@ -312,6 +312,28 @@ describe('independent edit sessions', () => {
     }
   });
 
+  it('keeps what was undone to redo when a drag begun after the undo is called off', async () => {
+    const { createEditSession } = await import('../src/model/store');
+    const session = createEditSession();
+    const { backend } = versionedDisk([blank('aaa')]);
+    try {
+      await session.boot(backend);
+      const s = () => session.useStore.getState();
+      const box = { ...makeNode('rect', 0, 0, new Set()), x: 0, y: 0 };
+      s().mutate((d) => ({ ...d, nodes: [box] }));
+      s().updateNode(box.id, { x: 100 });
+      s().undo();
+      s().checkpoint();
+      s().updateNode(box.id, { y: 50 }, false);
+      s().dropStep();
+      expect(s().doc.nodes).toMatchObject([{ x: 0, y: 0 }]);
+      s().redo();
+      expect(s().doc.nodes).toMatchObject([{ x: 100, y: 0 }]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('does not finish booting or resume saving after disposal', async () => {
     const { createEditSession } = await import('../src/model/store');
     const session = createEditSession();

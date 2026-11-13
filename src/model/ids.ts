@@ -64,4 +64,7 @@ export function freshId(taken: Set<string>, prefix: string): string {
   }
 }
 
+/** The prefix `id` was made with (see freshId), to make the id of a copy of what holds it; 'n' for none. */
+export const prefixOf = (id: string): string => id.replace(/-?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, '').replace(/\d+$/, '') || 'n';
+
 export const randomId = (): string => Math.random().toString(36).slice(2, 10);
