@@ -57,12 +57,28 @@ function UpdateButton() {
   );
 }
 
+/** Shown with a viewer's state: the board is there to look at. */
+const LOOK = (
+  <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5S2 10 2 10z" />
+    <circle cx="10" cy="10" r="2.5" />
+  </svg>
+);
+
 /**
  * The save state of a shared project's board: saved once the collaboration server has stored the
- * edits, not when it has them; until then, whether this device keeps them.
+ * edits, not when it has them; until then, whether this device keeps them. A viewer, who saves
+ * nothing, is shown that it only looks, and whether it is connected.
  */
 function SharedSaveState({ collab, saving, saveError, project }: { collab: CollabState; saving: State['saving']; saveError: string | null; project: string }) {
   const { pending, link, device, unkept } = collab;
+  if (collab.role === 'viewer')
+    return (
+      <span className="save-state viewer" title={`共有中の案件「${project}」`}>
+        {LOOK}
+        閲覧のみ{link === 'online' ? '' : link === 'offline' ? '・オフライン' : '・接続中…'}
+      </span>
+    );
   const shared = `共有中の案件「${project}」（試験中: ${SHARED_SO_FAR}を共有します）`;
   const [text, tip] = unkept
     ? ['本端末に保存できていません', saveError ?? '理由は不明']
