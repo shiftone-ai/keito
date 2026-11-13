@@ -18,9 +18,11 @@ import { EdgeView, HopCaps, INK, LabelChip, NodeView, SCREEN, STICKY_HEAD, TEXT,
 import { QuickBar } from '../ui/QuickBar';
 import { openBoards } from '../ui/Boards';
 import { EmptyProject } from '../ui/SharedBoards';
+import { Participants } from '../ui/Participants';
 import { ContextMenu } from './ContextMenu';
 import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys';
 import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, callOff, canConnect, endDrag, lostTarget, st } from './drag';
+import { PeerMarks } from './PeerMarks';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
 
@@ -619,7 +621,13 @@ export function Canvas() {
     return { sx: dx + ax.delta, sy: dy + ay.delta };
   };
 
+  const onLeave = () => {
+    setPointer(null);
+    st().collab?.point(null);
+  };
+
   const onMove = (e: RPointerEvent) => {
+    st().collab?.point(world(e));
     const d = drag.current;
     if (st().placing || placesBox(st().tool)) setPointer(world(e));
     if (!d) return;
@@ -933,7 +941,7 @@ export function Canvas() {
         void insertImages([...e.dataTransfer.files], world(e));
       }}
     >
-      <svg ref={svgRef} width="100%" height="100%" style={{ cursor }} onPointerDownCapture={letGoOfFields} onPointerDown={onBackgroundDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onPointerLeave={() => setPointer(null)} onDoubleClick={onDoubleClick} onContextMenu={onContextMenu}>
+      <svg ref={svgRef} width="100%" height="100%" style={{ cursor }} onPointerDownCapture={letGoOfFields} onPointerDown={onBackgroundDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onPointerLeave={onLeave} onDoubleClick={onDoubleClick} onContextMenu={onContextMenu}>
         <defs>
           <pattern id="dots" width={20 * view.k} height={20 * view.k} patternUnits="userSpaceOnUse" x={view.x} y={view.y}>
             <circle cx={1} cy={1} r={1} fill="#cbd5e1" />
@@ -985,6 +993,7 @@ export function Canvas() {
           {others.map(nodeGroup)}
           <SharedMarks doc={doc} />
           <CommentPins doc={doc} sel={sel} />
+          <PeerMarks doc={doc} routes={routes} k={view.k} />
 
           {preview && handleNode && hoverSide && (
             <g pointerEvents="none" opacity={0.55}>
@@ -1098,6 +1107,7 @@ export function Canvas() {
         <button onClick={() => zoomBy(1.25)} title="拡大">＋</button>
         <button onClick={() => st().fit()} title={shortcuts('全体表示 (⇧1)')}>全体</button>
       </div>
+      {collab && <Participants collab={collab} />}
     </div>
   );
 }
