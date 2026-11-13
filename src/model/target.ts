@@ -1,5 +1,6 @@
 import type { Backend } from '../platform/storage';
 import type { EditKind } from '../collab/scope';
+import type { TextDelta } from './delta';
 import type { State } from './store';
 import type { Doc } from './types';
 
@@ -44,6 +45,37 @@ export interface Edits {
   redo(): void;
   /** The board is left for another (as it was before leaving): what is kept here for a return to it. */
   keepSteps(was: State): void;
+  /**
+   * Type into a text of the board character by character, alongside others typing into it (see
+   * TextSession). `joins`: the typing is part of the last step to undo (the box it names, just put
+   * down). Null where the field typed into holds the text until it is written whole (a board of this
+   * machine), or where the text is not there.
+   */
+  typeInto(at: TextAt, joins: boolean): TextSession | null;
+}
+
+/** A text of the board typed by hand: one of a node's (`text`, a device's `note`) or a line's (`label`, `note`), by its id. Where it is shown has no part in it. */
+export interface TextAt {
+  id: string;
+  field: 'text' | 'label' | 'note';
+}
+
+/**
+ * Typing into one text, which others may be typing into at the same time: each change goes in as
+ * typed, as a delta of the text (see delta.ts). What a field shows of it is ui/typing.ts's.
+ */
+export interface TextSession {
+  /** The text as it is now. */
+  value(): string;
+  /** A change typed here, made to the text as `value` gives it. Dropped once the text is gone. */
+  edit(delta: TextDelta): void;
+  /** Hear every change to the text not made through `edit` (others' typing, an undo), as made to the text before it; null once the text is gone (its node or line taken off). */
+  listen(hear: (delta: TextDelta | null) => void): () => void;
+  /** Take back the last of what was typed, or put back what was last taken back; others' typing stays. */
+  undo(): void;
+  redo(): void;
+  /** Stop typing. What was typed stays one step to undo, or (`keep` false) is called off with what joined it, leaving nothing to redo; others' typing stays. */
+  end(keep: boolean): void;
 }
 
 /** Keeping the board's edits, and what leaving the board or closing the page waits for. */

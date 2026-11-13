@@ -23,7 +23,7 @@ export function Field({ label, value, onChange, multiline, wrap, type = 'text', 
   const props = {
     value,
     placeholder,
-    disabled: !!freeText && !takes('typing'),
+    disabled: !!freeText && !takes('fields'),
     // Lets a field hand pasted text to another one (a URL pasted into the model field, say).
     onPaste: (e: { clipboardData: DataTransfer; preventDefault: () => void }) => {
       if (onPasteText?.(e.clipboardData.getData('text/plain'))) e.preventDefault();
@@ -261,7 +261,7 @@ export function PortName({ value, onChange }: { value: string; onChange: (v: str
   return (
     <input
       value={value}
-      disabled={!takes('typing')}
+      disabled={!takes('fields')}
       onFocus={burst.begin}
       onBlur={burst.end}
       onKeyDown={(e) => {
