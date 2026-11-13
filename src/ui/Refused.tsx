@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { refusalText } from '../collab/refusals';
 import { useStore } from '../model/store';
 import { ask } from '../platform/io';
@@ -20,20 +21,26 @@ export function RefusedBanner() {
   const refusal = useStore((s) => s.collab?.refusal);
   const pending = useStore((s) => s.collab?.pending);
   const kept = useStore((s) => s.collab?.device === 'saved');
+  const [busy, setBusy] = useState(false);
   if (!recover || !refusal) return null;
+  // Not taken again while one is under way: a second click would write the boards twice.
+  const settle = (how: () => Promise<unknown>) => {
+    setBusy(true);
+    void how().finally(() => setBusy(false));
+  };
   return (
     <div className="rev-banner refused" role="region" aria-label="共同編集先に送れない変更">
       <span className="why" role="alert">
         {WARN}
         <span>
-          <b>{refusalText(refusal)}</b>。未送信の変更 {pending} 件は送れません{kept ? 'が、この端末に残っています' : ''}。
+          <b>{refusalText(refusal)}</b>。未送信の変更 {pending} 件は送れません{kept ? 'が、この端末に残っています。' : '。閉じると失われます。'}
         </span>
       </span>
       <span className="actions">
-        <button onClick={() => void ask(`未送信の変更 ${pending} 件を捨てて、共同編集先から開き直しますか？\n開けないときは、この端末のボードに戻ります。`).then((yes) => (yes ? recover.rejoin() : undefined))}>
+        <button disabled={busy} onClick={() => settle(() => ask(`未送信の変更 ${pending} 件を捨てて、共同編集先から開き直しますか？\n開けないときは、この端末のボードに戻ります。`).then((yes) => (yes ? recover.rejoin() : undefined)))}>
           変更を捨てる
         </button>
-        <button className="primary" onClick={() => void recover.copy()}>
+        <button className="primary" disabled={busy} onClick={() => settle(recover.copy)}>
           手元のボードにコピー
         </button>
       </span>
