@@ -144,7 +144,7 @@ test('two browsers keep a line on a port one moves down while the other pulls th
   const hdmi1 = b.locator('#canvas circle.port-hit').nth(3);
   await drag(b, await middleOf(hdmi1), await middleOf(device(b, 'プロジェクター')), async () => {
     await a.locator('.inspector .port-row').nth(3).locator('button[title="下へ"]').click();
-    await expect.poll(() => portY(b, 'HDMI 1')).toBeGreaterThan(await portY(b, 'HDMI 2'));
+    await expect.poll(async () => (await portY(b, 'HDMI 1')) > (await portY(b, 'HDMI 2'))).toBe(true);
   });
 
   const listed = await alike(a, b, (page) => cables(page, 1));
