@@ -112,9 +112,12 @@ describe('a device placed on boards of a shared project as one shared device', (
     a.s().updateNode(twin.id, { ip: '192.168.0.10', host: 'main-pc' });
     a.s().updateNode(twin.id, { x: 40, y: 80 });
 
-    for (const x of [a, b])
+    for (const x of [a, b]) {
       for (const [id, on] of [[pc.id, seed.board.id], [twin.id, back]])
         await until(() => x.device(id, on)?.text === 'メインPC' && x.device(id, on)?.ip === '192.168.0.10', 5_000, 'both changes on each board of each editor');
+      // Each step is sent on its own: the colour and the move may come after the name and the IP.
+      await until(() => x.device(pc.id, seed.board.id)?.color === 'blue' && x.device(twin.id, back)?.x === 40, 5_000, 'the colour and the move to reach each editor');
+    }
     for (const x of [a, b]) {
       expect(x.device(pc.id, seed.board.id)).toMatchObject({ x: 300, y: 0, color: 'blue', host: 'main-pc' });
       expect(x.device(twin.id, back)).toMatchObject({ x: 40, y: 80, host: 'main-pc' });
