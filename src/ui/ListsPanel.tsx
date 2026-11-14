@@ -9,7 +9,7 @@ import { ICON } from './icons';
 import { composing } from './keys';
 import { copyText, linkClick } from '../platform/io';
 
-/** Cells of text typed by hand (names, notes, labels): filled only where the board takes typing (see EditKind). */
+/** Cells of text typed by hand (names, notes, labels): filled only where the board takes them written whole, as the inspector's fields (see EditKind). */
 const TYPED = new Set(['text', 'note', 'label']);
 
 export function ListsPanel() {
@@ -31,7 +31,7 @@ export function ListsPanel() {
   if (!t) return null;
   const cellEdit = (row: number, col: number): CellEdit | null => {
     const edit = editable(t, row, col);
-    return edit && (takes('typing') || !TYPED.has(edit.field)) ? edit : null;
+    return edit && (takes('fields') || !TYPED.has(edit.field)) ? edit : null;
   };
   // The rows in the order they are shown: while a row is dragged, already where it would go.
   const order = t.rows.map((_, i) => i);

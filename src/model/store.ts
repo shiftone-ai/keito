@@ -9,6 +9,7 @@ import { fitLegends } from './legend';
 import { drawingOf, entryFor, fingerprint, sameBoard, thin } from './history';
 import { localSaving } from './saving';
 import type { StoreAction, Target } from './target';
+import type { TextAt, TextSession } from './target';
 import { create } from 'zustand';
 import { type Backend, type BoardInfo, Conflict, type TrashedBoard, connect, externalize, localBoards } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
@@ -153,6 +154,8 @@ export interface State {
   setTool(tool: Tool): void;
   setView(view: View): void;
   setEditing(id: string | null): void;
+  /** Type into a text of the board on screen character by character (see Edits.typeInto); null where the field holds it until it is written whole, or on an older state on screen. */
+  typeInto(at: TextAt, joins: boolean): TextSession | null;
   setPanel(panel: Panel): void;
   /** Open or close a side panel (toggled when `on` is left out). */
   setDock(dock: Dock, on?: boolean): void;
@@ -339,6 +342,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       setTool: (tool) => void (takes(tool) && set({ tool, placing: null })),
       setView: (view) => set({ view }),
       setEditing: (editing) => void ((!editing || takes('typing')) && set({ editing })),
+      typeInto: (at, joins) => (get().viewing ? null : target.edits.typeInto(at, joins)),
       setPanel: (panel) => set({ panel }),
       setDock: (dock, on) => set((s) => ({ docks: { ...s.docks, [dock]: on ?? !s.docks[dock] } })),
       fit: () => {

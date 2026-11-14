@@ -206,8 +206,8 @@ describe('a shared project', () => {
     a.s().setDoc({ ...before, meta: { ...before.meta, title: '全文で上書き' } });
     a.s().mutate((d) => ({ ...d, nodes: [...d.nodes, { id: 'img', type: 'image', x: 0, y: 0, w: 10, h: 10, text: '', src: 'data:,' }] }));
     a.s().nameState('提出版');
-    // A text box would be nothing there: no text is typed into it yet.
-    for (const tool of ['sequence', 'text'] as const) a.s().setTool(tool);
+    // A sequence diagram's source is not shared yet.
+    a.s().setTool('sequence');
     expect(a.s().notice).toMatch(/共有中のボード/);
     expect(a.s().tool).toBe('select');
     a.disk.box.notify({ id: seed.board.id, serial: 99 });

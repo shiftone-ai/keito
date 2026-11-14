@@ -282,6 +282,20 @@ describe('a device placed on boards of a shared project as one shared device', (
     expect(b.device(pc.id)).toMatchObject({ x: 300, maker: 'Apple' });
   });
 
+  it('types the name of a device placed on two boards into the shared device: the other board shows each letter, and undo takes back only what was typed', async () => {
+    const { a, b, pc, twin } = await onTwoBoards();
+    const typing = a.s().typeInto({ id: twin.id, field: 'text' }, false)!;
+    expect(typing.value()).toBe(pc.text);
+    typing.edit([{ retain: pc.text.length }, { insert: '-1' }]);
+    typing.end(true);
+    expect(a.device(twin.id)?.text).toBe(`${pc.text}-1`);
+    await until(() => b.device(pc.id)?.text === `${pc.text}-1`, 5_000, 'the letters to reach the other board');
+
+    a.s().undo();
+    expect(a.device(twin.id)).toMatchObject({ text: pc.text, shared: b.device(pc.id)?.shared });
+    await until(() => b.device(pc.id)?.text === pc.text, 5_000, 'the undo to reach the other board');
+  });
+
   it('undoes a link made here, leaving the shared device to a device someone else linked to it meanwhile', async () => {
     const { a, b, pc, twin, back, key } = await onTwoBoards();
     const third = b.add('pc', 600, 0);

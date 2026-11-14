@@ -94,7 +94,7 @@ async function onTwoBoards(browser: Browser) {
 
 test('two browsers keep a PC placed on two boards as one: an IP given on one board is on the other board too, and deleting it from all boards says what goes and one undo brings it back', async ({ browser }) => {
   const { a, b } = await onTwoBoards(browser);
-  // The name is typed with the text on the board, which a shared board does not take yet.
+  // The name is typed on the board: the inspector's field, written whole, is not taken on a shared board yet.
   await expect(field(a.page, '名称', 'textarea')).toBeDisabled();
 
   await clickOn(b.page, device(b.page, 'PC'));
@@ -114,8 +114,18 @@ test('two browsers keep a PC placed on two boards as one: an IP given on one boa
   await a.page.keyboard.press('ControlOrMeta+z');
   await expect(device(a.page, 'PC')).toHaveCount(1);
   await expect(device(b.page, 'PC')).toHaveCount(1);
-  await clickOn(b.page, device(b.page, 'PC'));
-  await expect(field(b.page, 'IP アドレス')).toHaveValue('192.168.0.10');
+  // Read off the list, not by clicking the PC again: two clicks on it this soon open its name for typing.
+  expect(await networkRows(b.page)).toEqual(['PC  192.168.0.10']);
+
+  // The name typed on the second board is the system board's too, beside the IP given there.
+  await clickOn(a.page, device(a.page, 'PC'));
+  await a.page.keyboard.press('Enter');
+  await expect(a.page.locator('.text-editor')).toBeFocused();
+  await a.page.keyboard.press('End');
+  await a.page.keyboard.type('-1');
+  await a.page.keyboard.press('ControlOrMeta+Enter');
+  await expect(device(b.page, 'PC-1')).toHaveCount(1);
+  expect(await networkRows(b.page)).toEqual(['PC-1  192.168.0.10']);
   await expect(b.page.locator('.save-state')).toHaveText('共同編集先に保存済み');
   await expect(a.page.locator('.save-state')).toHaveText('共同編集先に保存済み');
 });
