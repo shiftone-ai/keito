@@ -170,3 +170,16 @@ test('a picture laid under the drawing of a shared board is made lighter and bro
   await expect(underlay(a)).toHaveCount(0);
   await expect(shown(a)).toHaveCount(1);
 });
+
+test('a picture replaced on a shared board with a file of another name is shown in another browser, under the name it had', async ({ browser }) => {
+  const a = await newBrowser(browser);
+  const b = await newBrowser(browser);
+  await insert(a, svgFile('配置図'));
+  await expect(shown(b)).toHaveCount(1);
+
+  const chooser = a.waitForEvent('filechooser');
+  await a.locator('.inspector button', { hasText: '画像を差し替え' }).click();
+  await (await chooser).setFiles(svgFile('改訂版'));
+  await expect.poll(() => shownText(b)).toContain('改訂版');
+  await expect(a.locator('.inspector label.field', { hasText: '名前' }).locator('input')).toHaveValue('配置図');
+});

@@ -125,8 +125,8 @@ export function NodePanel({ n }: { n: Node }) {
         try {
           const img = await readImageFile(f);
           // Keep the width the picture already has on the board; follow the new proportions. Its name
-          // stays where no text is typed in (a shared board): a new one would have the whole change refused.
-          patch({ src: await storeImage(img.src), ...(takes('typing') ? { text: img.name } : {}), h: Math.round((n.w * img.h) / img.w) }, true);
+          // stays where a name is not set whole (a shared board): a new one would have the whole change refused.
+          patch({ src: await storeImage(img.src), ...(takes('fields') ? { text: img.name } : {}), h: Math.round((n.w * img.h) / img.w) }, true);
         } catch (e) {
           void tell(e instanceof Error ? e.message : String(e));
         }
