@@ -1,14 +1,16 @@
 import { sameBoard, stillIn } from '../model/history';
 import { fitLegends } from '../model/legend';
+import { tabOrder } from '../model/kinds';
 import { shareIds } from '../model/ids';
 import type { State, View } from '../model/store';
 import type { Target } from '../model/target';
 import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
-import type { LinkRefusal, SharedProject } from './client';
+import type { SharedProject } from './client';
 import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
 import { followPeers } from './peers';
-import { VIEW_ONLY } from './role';
+import { type LinkRefusal, refusalText } from './refusals';
+import { TURNED_AWAY, VIEW_ONLY } from './role';
 import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
 import { type BoardManagement, sharedTabs } from './tabs';
 import { validDrawing } from './valid';
@@ -32,12 +34,31 @@ export interface Host {
   /** A board has been put on screen: its address shown, and the board on `view`, or fitted to the window (undefined). */
   opened(view: View | undefined): void;
   /**
-   * The server turned this page away while it had the project open (the project deleted …): the
-   * session leaves it, telling the user why.
+   * The server turned this page away while it had the project open (the project deleted …), with no
+   * edit of this page unsent: the session leaves it, telling the user why.
    */
   refused(refusal: LinkRefusal): void;
+  /**
+   * Write `boards` to this machine's store as new boards of the project named `project`; their ids,
+   * or null when they could not all be written (the user is told why).
+   */
+  keepLocally(boards: Doc[], project: string): Promise<string[] | null>;
+  /** Put a board of this machine's store on screen in place of the project. */
+  openLocal(id: string): void;
+  /** Open the project anew from the server, this page holding nothing of it. */
+  rejoin(): void;
   /** Hear of every change to the session's state. */
   watch(hear: (s: State, prev: State) => void): () => void;
+}
+
+/**
+ * What can be done with edits of this page the server turned away (see ShareStatus): take them out,
+ * as boards of this machine's store holding the project as this page has it, or let them go and
+ * open the project anew from the server. Either takes the copy kept on this device off it.
+ */
+export interface Recovery {
+  copy(): Promise<void>;
+  rejoin(): Promise<void>;
 }
 
 /** The target of a shared project's board, and what puts the project on screen in the first place. */
@@ -66,10 +87,18 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   let unshare = (): void => {};
   /** Set while a board is left (see put): what is heard meanwhile is shown with the board put next. */
   let switching = false;
-  /** Set once the server has turned this page away: the session is leaving the project. */
+  /** Set once the server has turned this page away, or the edits it turned away are taken out or let go (see recover): the session is leaving the project. */
   let leaving = false;
+  /** Set once the target is closed: something else is on screen (see close). */
+  let closed = false;
   const viewer = (): boolean => project.status().role === 'viewer';
-  const takes = (what: EditKind): boolean => (board && !viewer() ? sharedTakes(what) : emptyTakes(what));
+  /** Set while the server has turned away edits of this page: the project is on screen as this page holds it, to look at and take them out. */
+  const refused = (): boolean => project.status().link === 'refused';
+  const looking = (): boolean => {
+    const { role, link } = project.status();
+    return role === 'viewer' || link === 'refused';
+  };
+  const takes = (what: EditKind): boolean => (board && !looking() ? sharedTakes(what) : emptyTakes(what));
   const tabs = sharedTabs(projectId, project, {
     shown: () => board,
     put,
@@ -81,6 +110,26 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   const stop = project.listen(refresh);
   /** Managing the boards as a viewer is offered it: each asked for is refused, as the server would. */
   const viewOnly: BoardManagement = { add: host.refuse, rename: host.refuse, restore: host.refuse, renameProject: host.refuse };
+  const recover: Recovery = {
+    async copy() {
+      const boards = tabOrder(project.boards()).flatMap((b) => project.board(b.id) ?? []);
+      if (!boards.length) return host.say('この共有案件には、手元にコピーするボードがありません');
+      const title = project.title();
+      const ids = await host.keepLocally(boards, `${title} のコピー`);
+      if (!ids) return;
+      leaving = true;
+      await project.discard();
+      // Not put on screen once another board has been opened meanwhile: it would take that one's place.
+      if (ids[0] && !closed) host.openLocal(ids[0]);
+      host.say(`共有案件「${title}」のボード ${ids.length} 枚を、手元のボードにコピーしました`);
+    },
+    async rejoin() {
+      leaving = true;
+      await project.discard();
+      // Not opened anew once another board has been opened meanwhile: it would take that one's place.
+      if (!closed) host.rejoin();
+    },
+  };
 
   /** What is on screen while the project has no board: nothing, under the project's name. */
   function noBoard(): Doc {
@@ -94,10 +143,11 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   function status(): Pick<State, 'collab' | 'saving' | 'saveError'> {
     const s = project.status();
     const unkept = s.pending > 0 && s.device === 'failed';
+    const away = s.link === 'refused' && s.refusal ? refusalText(s.refusal) : null;
     return {
-      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: viewer() ? viewOnly : tabs.manage, point: peers.point, introduce: peers.introduce },
-      saving: s.failure || unkept ? 'error' : s.pending ? 'saving' : 'saved',
-      saveError: unkept ? s.deviceFailure : s.failure,
+      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: looking() ? viewOnly : tabs.manage, recover: away ? recover : null, point: peers.point, introduce: peers.introduce },
+      saving: s.failure || unkept || away ? 'error' : s.pending ? 'saving' : 'saved',
+      saveError: unkept ? s.deviceFailure : (away ?? s.failure),
     };
   }
 
@@ -140,8 +190,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
    */
   function refresh(): void {
     if (switching || leaving) return;
-    const { link, refusal } = project.status();
-    if (link === 'refused') {
+    const { link, refusal, pending } = project.status();
+    // Not left while it holds edits of this page: they would be out of the user's reach.
+    if (link === 'refused' && !pending) {
       leaving = true;
       return host.refused(refusal ?? 'no-access');
     }
@@ -176,7 +227,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     edits: {
       takes,
       edit(next, record) {
-        if (!board || viewer()) return host.refuse();
+        if (!board || looking()) return host.refuse();
         const edit = editBetween(host.get().doc, next);
         if (!edit) return host.refuse();
         if (isNoEdit(edit)) return;
@@ -220,10 +271,13 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       },
       async leave() {
         const { pending, link } = project.status();
-        // Turned away, the project stores nothing more, and its copy here is not sent (see kept.ts): asking would offer no way to keep it.
-        if (!pending || link === 'refused') return true;
-        if (!safe()) return ask(`共同編集先にまだ保存されていない変更が ${pending} 件あります。\n切り替えると、この変更は失われます。切り替えますか？`);
-        host.say(`未送信の変更 ${pending} 件は、この共有案件を次に開いたときに送ります`);
+        if (!pending || leaving) return true;
+        const [lost, kept] =
+          link === 'refused'
+            ? [`共同編集先に送れない変更が ${pending} 件あります。`, `共同編集先に送れない変更 ${pending} 件は、この端末に残っています`]
+            : [`共同編集先にまだ保存されていない変更が ${pending} 件あります。`, `未送信の変更 ${pending} 件は、この共有案件を次に開いたときに送ります`];
+        if (!safe()) return ask(`${lost}\n切り替えると、この変更は失われます。切り替えますか？`);
+        host.say(kept);
         return true;
       },
       closing: () => !safe(),
@@ -235,7 +289,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     boards: {
       ...tabs.boards,
       remove(id) {
-        if (!viewer()) return tabs.boards.remove(id);
+        if (!looking()) return tabs.boards.remove(id);
         const shared = [...project.boards(), ...project.deletedBoards()].some((b) => b.id === id);
         if (shared) host.refuse();
         return shared;
@@ -243,10 +297,11 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     },
     local: null,
     get refusal() {
-      return viewer() ? VIEW_ONLY : board ? NOT_TAKEN : NO_BOARD;
+      return refused() ? TURNED_AWAY : viewer() ? VIEW_ONLY : board ? NOT_TAKEN : NO_BOARD;
     },
     start: tabs.start,
     close() {
+      closed = true;
       peers.close();
       unshare();
       stop();
