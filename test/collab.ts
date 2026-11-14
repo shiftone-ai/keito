@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { DatabaseSync } from 'node:sqlite';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { type CollabStore, openStore } from '../server/collab/store';
 import type { DeviceStore, KeptProject } from '../src/collab/kept';
@@ -19,6 +20,16 @@ export function seedData(kind?: Doc['kind']): { data: string; seed: ProjectSeed;
     return { data, seed, token: store.addGrant(seed.id).token };
   } finally {
     store.close();
+  }
+}
+
+/** How many edits the server has stored of `project` in `data`, read without holding the server off. */
+export function storedEdits(data: string, project: string): number {
+  const db = new DatabaseSync(join(data, 'keito-collab.sqlite'), { readOnly: true });
+  try {
+    return Number(db.prepare('SELECT COUNT(*) AS n FROM ops WHERE project = ?').get(project)!.n);
+  } finally {
+    db.close();
   }
 }
 
