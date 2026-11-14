@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SHARED_PROJECTS } from '../collab/trial';
 import { useStore } from '../model/store';
 import { getSetting, setSetting } from '../platform/io';
 import { openBoards } from './Boards';
+import { JoinProject } from './JoinProject';
 
 /** A project as last opened on this machine: when, and the board it was left on. */
 interface Visit {
@@ -33,7 +35,8 @@ const label = (p: string): string => p || '案件なし';
 /**
  * The project on screen, and a menu of the others to jump to: the last opened first (on this
  * machine), each opening on the board it was left on. 1–9 pick one, the arrows and Enter too.
- * The full list of projects and boards is one step further, at the foot.
+ * The full list of projects and boards is one step further, at the foot, and joining a shared
+ * project by its link last.
  */
 export function ProjectMenu() {
   const st = useStore.getState;
@@ -41,6 +44,7 @@ export function ProjectMenu() {
   const boards = useStore((s) => s.boards);
   const collab = useStore((s) => s.collab);
   const [open, setOpen] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [at, setAt] = useState(0);
   // The row the keys act on, read by the key handler as it is now.
   const atRef = useRef(0);
@@ -90,6 +94,13 @@ export function ProjectMenu() {
     setOpen(false);
     openBoards();
   };
+  const join = () => {
+    setOpen(false);
+    setJoining(true);
+  };
+  const allRow = others.length;
+  const joinRow = allRow + 1;
+  const lastRow = SHARED_PROJECTS ? joinRow : allRow;
 
   // Said when it opens or closes: the field that takes the IME's typing on a selected shape lets go
   // of the focus while it is open (see Canvas's ImeCatcher).
@@ -104,11 +115,12 @@ export function ProjectMenu() {
       // The digit as typed, or as the key under it with the IME on (which sends "Process").
       const n = /^Digit[1-9]$/.test(e.code) ? Number(e.code.slice(5)) : Number(e.key);
       if (!e.metaKey && !e.ctrlKey && Number.isInteger(n) && n >= 1 && n <= Math.min(9, others.length)) go(others[n - 1].board);
-      else if (e.key === 'ArrowDown') setAt((i) => Math.min(i + 1, others.length));
+      else if (e.key === 'ArrowDown') setAt((i) => Math.min(i + 1, lastRow));
       else if (e.key === 'ArrowUp') setAt((i) => Math.max(i - 1, 0));
       else if (e.key === 'Enter') {
-        if (atRef.current < others.length) go(others[atRef.current].board);
-        else all();
+        if (atRef.current < allRow) go(others[atRef.current].board);
+        else if (atRef.current === allRow) all();
+        else join();
       }
       else if (e.key === 'Escape' || ((e.metaKey || e.ctrlKey) && e.code === 'KeyK')) setOpen(false);
       // Other shortcuts (⌘S …) still work; any other key stays with the menu, rather than reach the
@@ -143,12 +155,18 @@ export function ProjectMenu() {
                 <small>{p.count} 枚</small>
               </button>
             ))}
-            <button role="menuitem" className={`project-item all${at === others.length ? ' on' : ''}`} onPointerEnter={() => setAt(others.length)} onClick={all}>
+            <button role="menuitem" className={`project-item all${at === allRow ? ' on' : ''}`} onPointerEnter={() => setAt(allRow)} onClick={all}>
               すべての案件とボード…
             </button>
+            {SHARED_PROJECTS && (
+              <button role="menuitem" className={`project-item join${at === joinRow ? ' on' : ''}`} onPointerEnter={() => setAt(joinRow)} onClick={join}>
+                共有案件に参加…
+              </button>
+            )}
           </div>
         </>
       )}
+      {joining && <JoinProject close={() => setJoining(false)} />}
     </div>
   );
 }

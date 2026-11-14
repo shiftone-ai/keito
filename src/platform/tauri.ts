@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask as askDialog, message } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { check } from '@tauri-apps/plugin-updater';
+import type { SharedJoin } from '../collab/client';
 import { boardKind, readBoard, readSerial } from '../model/load';
 import { boot, flushBeforeClose, useStore } from '../model/store';
 import { upgradePreset } from '../model/video';
@@ -101,6 +102,8 @@ function desktopBackend(): Backend {
     // The window waits for the last write as it closes (see below), so nothing is left to the last moment.
     fitsExitSave: () => true,
     exitSave: (doc: Doc) => void desktop.save(doc).catch(() => {}),
+    // Not the web view's IndexedDB: kept there, a shared project would be said to be kept on this device, with nothing yet to open it from again (#25).
+    device: null,
   };
   return desktop;
 }
@@ -227,8 +230,12 @@ async function lookForUpdate(asked: boolean): Promise<void> {
   if (asked) await startUpdate();
 }
 
-/** Start the desktop app: its ways in, its folder settled, its store connected, and its window closing only once all is written. */
-export async function startDesktop(): Promise<void> {
+/**
+ * Start the desktop app: its ways in, its folder settled, its store connected, and its window closing
+ * only once all is written. `opening`: the shared project to open in place of a board of this machine
+ * (the one on screen before the page was reloaded).
+ */
+export async function startDesktop(opening?: SharedJoin): Promise<void> {
   usePlatform(system);
   // The ways out come first: quitting, closing and reloading work while the folder is still being
   // asked for on first launch, and when starting fails (there is then nothing unsaved to write).
@@ -285,7 +292,7 @@ export async function startDesktop(): Promise<void> {
   void listen('check-update', () => void lookForUpdate(true));
   try {
     await settleFolder();
-    await boot(desktopBackend());
+    await boot(desktopBackend(), opening);
   } catch (e) {
     console.error(e);
     await system.tell(`ボードのフォルダを開けませんでした。\n\n${e instanceof Error ? e.message : String(e)}\n\n${shortcuts('表示 > 再読み込み（⌘R）')}でやり直せます。`);
