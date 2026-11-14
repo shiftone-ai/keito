@@ -67,7 +67,7 @@ export function NodePanel({ n }: { n: Node }) {
       <div key={key} className={`legend-row${hidden ? ' off' : ''}`}>
         <input type="checkbox" checked={!hidden} title={hidden ? 'この行を凡例に出す' : 'この行を凡例から外す'} onChange={(e) => show(key, e.target.checked)} />
         <span className="swatch" style={swatch} />
-        <input value={n.names?.[key] ?? ''} placeholder={usual} disabled={!takes('typing')} onChange={(e) => rename(key, e.target.value)} />
+        <input value={n.names?.[key] ?? ''} placeholder={usual} disabled={!takes('fields')} onChange={(e) => rename(key, e.target.value)} />
       </div>
     );
     return (

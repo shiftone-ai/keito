@@ -82,5 +82,7 @@ export function localEdits(host: EditsHost): LocalEdits {
       return back && back.print === fingerprint(doc) ? back : null;
     },
     clear: () => kept.clear(),
+    // The field typed into holds the text until it is written whole (see TextEditor in Canvas.tsx).
+    typeInto: () => null,
   };
 }

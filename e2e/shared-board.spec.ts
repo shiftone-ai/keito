@@ -117,6 +117,9 @@ test('two browsers see the boxes each puts on a shared board, and the colours an
   await a.locator('.toolbar button[aria-label="四角"]').click();
   const area = (await a.locator('#canvas').boundingBox())!;
   await a.mouse.click(area.x + area.width / 2 + 160, area.y + area.height / 2 + 160);
+  // A box put down opens its text to type into, as on a board of this machine; left empty, it stays.
+  await expect(a.locator('.text-editor')).toBeFocused();
+  await a.keyboard.press('Escape');
   await expect(box(b)).toHaveCount(1);
 
   await box(b).first().click();
@@ -187,36 +190,33 @@ test('each browser undoes only its own edits of a shared board', async ({ browse
   await expect.poll(() => placeOf(b)).toEqual(moved);
   await shape(b).click();
   await b.locator('.inspector .swatches button[title="blue"]').click();
-  await shape(a).click();
+  // A's shape is still selected from the drag (clicked again this soon, it would open its text).
   await expect(colour(a)).toHaveAttribute('title', 'blue');
 
   await a.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => placeOf(b)).toEqual({ x: 0, y: 0 });
   await expect(colour(b)).toHaveAttribute('title', 'blue');
   await b.keyboard.press('ControlOrMeta+z');
-  await shape(a).click();
   await expect(colour(a)).toHaveAttribute('title', 'white');
   expect(await placeOf(a)).toEqual({ x: 0, y: 0 });
 });
 
 test('a shared board turns away what it does not take yet, and a board of this machine still saves to its folder', async ({ browser }) => {
   const a = await openLink(browser);
-  await expect(a.locator('.toolbar button[aria-label="四角"]')).toHaveCount(1);
-  for (const tool of ['テキスト']) await expect(a.locator(`.toolbar button[aria-label="${tool}"]`)).toHaveCount(0);
-  // Text copied in another app would be pasted as a text box.
+  for (const tool of ['四角', 'テキスト', '画像・SVG を埋め込む']) await expect(a.locator(`.toolbar button[aria-label="${tool}"]`)).toHaveCount(1);
+  // Text copied in another app is pasted as a text box.
   await a.evaluate(() => {
     const data = new DataTransfer();
     data.setData('text/plain', '貼り付けたメモ');
     window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data }));
   });
-  await expect(a.locator('.notice')).toHaveText(/共有中のボードでは/);
-  await expect(a.locator('#canvas').getByText('貼り付けたメモ')).toHaveCount(0);
+  await expect(a.locator('#canvas').getByText('貼り付けたメモ')).toHaveCount(1);
   await shape(a).click();
-  // Its text is typed by hand: not on a shared board yet. Its look is.
+  // Its text is typed on the board, not in the inspector's field yet. Its look is changed there.
   await expect(a.locator('.inspector label.field', { hasText: 'テキスト' }).locator('textarea')).toBeDisabled();
   await expect(a.locator('.inspector .swatches button').first()).toBeEnabled();
   await expect(a.locator('.quickbar button[aria-label^="削除"]')).toHaveCount(1);
-  await expect(a.locator('.quickbar button[aria-label^="文字を編集"]')).toHaveCount(0);
+  await expect(a.locator('.quickbar button[aria-label^="文字を編集"]')).toHaveCount(1);
   await shape(a).click({ button: 'right' });
   for (const label of ['コピー', '切り取り', '貼り付け', '複製', '最前面へ', '最背面へ', '削除']) await expect(a.locator('.context-menu button', { hasText: label })).toBeEnabled();
   await a.keyboard.press('Escape');
