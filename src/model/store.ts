@@ -200,7 +200,8 @@ export interface State {
 /**
  * A session owns its editor, pending work and page subscriptions. `page`: the session is the page's
  * (it follows and shows the address, and hears the page close). `device`: where shared projects are
- * kept on this device, and `pictures`, their pictures; unset, this browser's (none outside one).
+ * kept on this device; unset, where the store booted says (see Backend.device). `pictures`: where
+ * their pictures are; unset, this browser's, unless the projects are kept nowhere.
  */
 export function createEditSession(options: { page?: boolean; device?: DeviceStore | null; pictures?: PictureDevice | null } = {}) {
   let disposed = false;
@@ -846,7 +847,9 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
     const { joinProject, refusalText } = await import('../collab/client');
     if (!current()) return false;
-    const project = joinProject(join, options.device === undefined ? browserDevice : options.device, options.pictures === undefined ? browserPictures : options.pictures);
+    const device = options.device !== undefined ? options.device : b.device !== undefined ? b.device : browserDevice;
+    // Not kept where the project is not (the desktop app): an unsent picture would outlive the edit that placed it.
+    const project = joinProject(join, device, options.pictures !== undefined ? options.pictures : device === null ? null : browserPictures);
     try {
       await project.ready;
     } catch (e) {
