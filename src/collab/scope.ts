@@ -31,9 +31,10 @@ export type Attribute = (typeof ATTRIBUTES)[SharedType][number];
 
 /**
  * Besides every node's text, what a node holds that is typed by hand (a device's note, a legend's row
- * names). Written when the node is put on the board; not changed afterwards on a shared board yet,
- * since putting a whole new text in place of one being typed into by someone else would lose their
- * letters. A port's name and a line's texts (LINE_TEXTS) are kept the same way.
+ * names). Written whole only when the node is put on the board: a whole new text put in place of one
+ * someone else is typing into would lose their letters. Afterwards it is changed only by typing into
+ * it (see typing.ts), as the board does with a node's text and a line's label; the inspector's
+ * fields do not yet (see `fields`). A port's name and a line's texts (LINE_TEXTS) are kept the same way.
  */
 export const WRITTEN_ONCE: Partial<Record<SharedType, readonly string[]>> = {
   device: ['note'],
@@ -55,15 +56,16 @@ export type LineAttribute = (typeof LINE_ATTRIBUTES)[number];
 export const LINE_TEXTS = ['label', 'note'] as const;
 
 /**
- * An edit a board can be asked for besides changing its nodes: picking a tool, typing text in,
- * making copies (duplicating, pasting), the order things are drawn or listed in (nodes, a device's
- * ports), the board's settings, pictures, a device being one with devices on other
- * boards (or software running on one), tidying the board up, comments, and taking the board off.
+ * An edit a board can be asked for besides changing its nodes: picking a tool, typing text in on the
+ * board (`typing`), typing into the inspector's fields (`fields`: names, notes, a port's name, each
+ * set whole as typed), making copies (duplicating, pasting), the order things are drawn or listed in
+ * (nodes, a device's ports), the board's settings, pictures, a device being one with devices on
+ * other boards (or software running on one), tidying the board up, comments, and taking the board off.
  */
-export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
+export type EditKind = Tool | 'typing' | 'fields' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
-/** What a shared board does not take yet. A text box is nothing until text is typed into it. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'settings', 'images', 'links', 'tidy', 'comments']);
+/** What a shared board does not take yet. */
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'images', 'links', 'tidy']);
 
 /** Whether a shared board takes an edit of this kind. */
 export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
@@ -76,5 +78,5 @@ export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free']
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
-export const SHARED_SO_FAR = '図形や機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順';
-export const NOT_SHARED_YET = '名前やメモなどの文字の入力、ボードの設定';
+export const SHARED_SO_FAR = '図形・テキスト・機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順';
+export const NOT_SHARED_YET = 'インスペクタでの名前やメモなどの入力、ボードの設定';

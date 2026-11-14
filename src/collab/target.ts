@@ -242,6 +242,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       redo: () => step('redo'),
       // Nothing of it is kept here: a return to it goes through its project.
       keepSteps: () => {},
+      typeInto: (at, joins) => (board && !viewer() ? project.typeInto(board, at, joins) : null),
     },
     saving: {
       async flush() {

@@ -90,6 +90,8 @@ test('two browsers share copies and an alignment made at once with other edits, 
   await clickOn(a, shapes(a).first());
   await a.keyboard.press('ControlOrMeta+d');
   await putBox(b, 200, 160);
+  // Put down, the box opens its text to type into, as on a board of this machine.
+  await b.keyboard.press('Escape');
   await clickOn(b, boxes(b).first(), 'right');
   await b.locator('.context-menu button', { hasText: 'コピー' }).click();
   await clickOn(b, boxes(b).first(), 'right');

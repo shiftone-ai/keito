@@ -23,6 +23,9 @@ import { composing, isCatcher, isField, onControl, overBoard } from '../ui/keys'
 import { type Corner, type Drag, type Ghost, type Plan, SIDES, ACCENT, callOff, canConnect, endDrag, lostTarget, st } from './drag';
 import { planConnect, planReconnect, planSpawn, ConnectGhost } from './connect';
 import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, previewLine, arrowGlyph } from './overlays';
+import type { TextSession } from '../model/target';
+import type { Typing } from '../ui/typing';
+import { editableField, typeIntoEditable } from './editable';
 
 const MIN = { w: 40, h: 30 };
 
@@ -1278,21 +1281,51 @@ function TextEditor({ id }: { id: string }) {
   const done = useRef(false);
   const grew = useRef(false);
   const startH = useRef(node?.h);
+  /** On a shared board: the text, typed into as it is typed (see ui/typing.ts), rather than written whole once done. */
+  const shared = useRef<{ session: TextSession; typing: Typing } | null>(null);
+  /** The box's growth as of the last render, for the typing set up once (the node it reads changes as others edit it). */
+  const grown = useRef(() => {});
 
   // Layout effect: focus must land synchronously so a keystroke that opened the
   // editor (including the first IME key) is typed into it.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.innerText = node ? node.text : (edge?.label ?? '');
+    const session = st().typeInto({ id, field: node ? 'text' : 'label' }, fresh === id);
     el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    if (!session) {
+      el.innerText = node ? node.text : (edge?.label ?? '');
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+    const value = session.value();
+    editableField(el).write(value, [0, value.length]);
+    /** Taken off by someone else: typing ends, what was typed going with what was taken off. */
+    const gone = () => {
+      done.current = true;
+      finish(true);
+      st().setEditing(null);
+    };
+    shared.current = { session, typing: typeIntoEditable(el, session, { oneLine: node?.type === 'frame', typed: () => grown.current(), gone }) };
+    return () => {
+      shared.current?.typing.flush();
+      finish(true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Stop typing into the shared text: what was typed stays, or (`keep` false) is called off with what joined it. */
+  function finish(keep: boolean): void {
+    const at = shared.current;
+    if (!at) return;
+    shared.current = null;
+    at.typing.close();
+    at.session.end(keep);
+  }
 
   if (!node && !edge) return null;
   const k = view.k;
@@ -1301,32 +1334,49 @@ function TextEditor({ id }: { id: string }) {
   const oneLine = node?.type === 'frame';
   const enterCommits = oneLine || !node || node.type === 'device';
   const read = (): string => {
-    const text = (ref.current?.innerText ?? '').replace(/\n+$/, '');
+    const text = (shared.current?.session.value() ?? ref.current?.innerText ?? '').replace(/\n+$/, '');
     return oneLine ? text.replace(/\n/g, ' ') : text;
   };
-  // The box follows the text while typing, so a long label never spills out of its shape.
+  // The box follows the text while typing, so a long label never spills out of its shape. No
+  // checkpoint on a shared board: each growth joins the step the typing is.
   const grow = () => {
     if (!node) return;
     const h = neededHeight(node, read());
     if (h == null) return;
     if (!grew.current) {
       grew.current = true;
-      if (fresh !== id) st().checkpoint();
+      if (fresh !== id && !shared.current) st().checkpoint();
     }
     st().updateNode(id, { h }, false);
   };
+  grown.current = grow;
   const commit = () => {
     if (done.current) return;
     done.current = true;
     const s = st();
-    const text = read();
     const first = fresh === id;
     const dropped = casual === id;
     fresh = null;
     casual = null;
+    /** Whether the box goes once its text is done: a text box left empty, or one a double-click dropped and left with no text (see below). */
+    const leftEmpty = (text: string): boolean => !!node && !text && (node.type === 'text' || (dropped && first));
+    const at = shared.current;
+    if (at) {
+      at.typing.flush();
+      const value = at.session.value();
+      const text = value.replace(/\n+$/, '');
+      if (text !== value) at.session.edit([{ retain: text.length }, { delete: value.length - text.length }]);
+      const empty = leftEmpty(text);
+      // Grown once more for the whole text: what others typed meanwhile was shown here, not grown for.
+      if (!empty) grow();
+      finish(!(empty && first));
+      if (empty && !first) s.removeIds([id]);
+      return s.setEditing(null);
+    }
+    const text = read();
     if (edge) {
       if (text !== edge.label) s.updateEdge(id, { label: text });
-    } else if (node && !text && (node.type === 'text' || (dropped && first))) {
+    } else if (leftEmpty(text)) {
       // A text box left empty would be an invisible, unselectable leftover. Just put down, it is
       // called off altogether: no undo step brings back an empty box.
       s.setEditing(null);
@@ -1345,6 +1395,11 @@ function TextEditor({ id }: { id: string }) {
     if (fresh === id) return commit();
     done.current = true;
     const s = st();
+    // Not back to the text as it was, as below: that would take off what others typed meanwhile.
+    if (shared.current) {
+      finish(false);
+      return s.setEditing(null);
+    }
     if (grew.current) s.dropStep();
     else if (node && startH.current != null && node.h !== startH.current) s.updateNode(id, { h: startH.current }, false);
     s.setEditing(null);
@@ -1389,7 +1444,7 @@ function TextEditor({ id }: { id: string }) {
         contentEditable
         suppressContentEditableWarning
         data-placeholder={edge ? 'ラベル' : 'テキストを入力'}
-        onInput={grow}
+        onInput={() => !shared.current && grow()}
         onBlur={commit}
         onKeyDown={(e) => {
           e.stopPropagation();
