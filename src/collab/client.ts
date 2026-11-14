@@ -5,7 +5,7 @@ import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
 import type { BoardEdit } from './edits';
-import { type DeviceState, type DeviceStore, keepCopy } from './kept';
+import { type DeviceState, type DeviceStore, type KeptProject, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
 import { type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
 import { type LinkRefusal, refusalOf, refusalText } from './refusals';
@@ -94,17 +94,22 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
   const fromDevice = Symbol('kept on this device');
   let provider: HocuspocusProvider | null = null;
 
+  /** Put a copy kept on this device in the Y.Doc, its unconfirmed edits with it. */
+  function takeIn(kept: KeptProject): void {
+    Y.transact(ydoc, () => {
+      Y.applyUpdate(ydoc, kept.state);
+      for (const [op, update] of kept.pending) {
+        pending.set(op, update);
+        Y.applyUpdate(ydoc, update);
+      }
+    }, fromDevice);
+  }
+
   async function start(): Promise<void> {
     const kept = await copy.load();
     if (closed) return;
     if (kept) {
-      Y.transact(ydoc, () => {
-        Y.applyUpdate(ydoc, kept.state);
-        for (const [op, update] of kept.pending) {
-          pending.set(op, update);
-          Y.applyUpdate(ydoc, update);
-        }
-      }, fromDevice);
+      takeIn(kept);
       joined = true;
       // Not asked again: the server let nothing of it in, and answering now it would not say what to do with the edits it turned away.
       if (!kept.editable) [status.link, status.refusal] = ['refused', kept.refusal ?? 'no-access'];
@@ -169,7 +174,15 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     clearTimeout(retryTimer);
     provider?.destroy();
     // Not before the project is on screen: this page holds nothing of it.
-    if (joined) copy.refused(status.refusal);
+    if (joined) {
+      copy.refused(status.refusal);
+      // Not left on the device only: another page of the project here may have kept edits this page never held, and taking out or letting go of the copy takes theirs with it.
+      void copy.settled().then((kept) => {
+        if (!kept || closed) return;
+        takeIn(kept);
+        notify();
+      });
+    }
     notify();
   }
 

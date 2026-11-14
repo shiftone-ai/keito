@@ -199,6 +199,64 @@ describe('edits kept on this device that the server turns away on reconnecting',
     expect(device.kept.size).toBe(1);
   });
 
+  it('taken out on one page, take with them those another page of the device kept and closed', async () => {
+    const device = memoryDevice();
+    const a = await editor({ device: device.store });
+    const b = await editor({ device: device.store });
+    const { port } = server;
+    await server.kill();
+    await Promise.all([a.offline(), b.offline()]);
+    a.drag(seed.shape.id, 300, 40);
+    await a.kept();
+    let put: Node | undefined;
+    b.s().mutate((d) => {
+      put = makeNode('rect', 0, 0, allIds(d), 'B の図形');
+      return { ...d, nodes: [...d.nodes, put] };
+    });
+    await until(() => b.s().collab?.device === 'saved' && b.s().collab?.pending === 1, 5_000, 'the shape to be kept on this device');
+    b.session.dispose();
+    administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
+    server = await startServer(data, port);
+
+    await a.refused();
+    await until(() => a.s().collab?.pending === 2, 5_000, 'the other page\'s edit to be taken in');
+    await a.s().collab!.recover!.copy();
+    await until(() => a.s().collab === null, 5_000, 'the copy to be opened');
+    expect(at(a.node(seed.shape.id))).toEqual({ x: 300, y: 40 });
+    expect(a.node(put!.id)?.text).toBe('B の図形');
+    expect(device.kept.size).toBe(0);
+  });
+
+  it('are let go for good when let go while this device is still writing them', async () => {
+    const device = memoryDevice();
+    let release = (): void => {};
+    let gate = Promise.resolve();
+    /** Its writes written, then held until released, as a write still committing. */
+    const slow: DeviceStore = {
+      load: (key) => device.store.load(key),
+      change: async (key, edit) => {
+        await device.store.change(key, edit);
+        await gate;
+      },
+    };
+    const a = await editor({ device: slow });
+    const { port } = server;
+    await server.kill();
+    await a.offline();
+    a.drag(seed.shape.id, 300, 40);
+    await a.kept();
+    gate = new Promise((r) => (release = r));
+    a.drag(seed.shape.id, 200, 20);
+    administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
+    server = await startServer(data, port);
+    await a.refused();
+
+    const letGo = a.s().collab!.recover!.rejoin();
+    release();
+    await letGo;
+    expect(device.kept.size).toBe(0);
+  });
+
   it('are not sent once the project is restored, and are let go only when asked, the project opening anew from the server', async () => {
     const device = memoryDevice();
     const { port } = server;

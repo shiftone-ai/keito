@@ -146,14 +146,24 @@ export function keepCopy(device: DeviceStore | null, key: string, hold: () => He
     },
     /**
      * Take a copy the server turned away off the device (its edits taken out, or let go), once the
-     * write under way is done; one let in since, by another page, stays. Nothing is kept after.
+     * writes under way are done; one let in since, by another page, stays. Nothing is kept after.
      */
     async discard(): Promise<void> {
+      // Not stopped before the writes under way are done: the refusal queued behind one would go unwritten, and the copy, left editable, be taken for one let in since.
+      while (writing) await writing;
       const was = store;
       [store, state, failure] = [null, 'none', null];
-      await writing;
       await was?.change(key, (kept) => (kept && !kept.editable ? null : kept));
       notify();
+    },
+    /**
+     * The copy kept on the device once the writes under way are done, with what other pages of the
+     * project on this device kept there beside this page's (see merged); null for none, and for one
+     * that cannot be read.
+     */
+    async settled(): Promise<KeptProject | null> {
+      while (writing) await writing;
+      return (await store?.load(key).catch(() => null)) ?? null;
     },
     /** An op the server confirmed stored: it leaves the copy. */
     confirmed(op: string): void {
