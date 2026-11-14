@@ -199,7 +199,7 @@ export interface State {
 /**
  * A session owns its editor, pending work and page subscriptions. `page`: the session is the page's
  * (it follows and shows the address, and hears the page close). `device`: where shared projects are
- * kept on this device; unset, this browser's (none outside one).
+ * kept on this device; unset, where the store booted says (see Backend.device).
  */
 export function createEditSession(options: { page?: boolean; device?: DeviceStore | null } = {}) {
   let disposed = false;
@@ -845,7 +845,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
     const { joinProject, refusalText } = await import('../collab/client');
     if (!current()) return false;
-    const project = joinProject(join, options.device === undefined ? browserDevice : options.device);
+    const project = joinProject(join, options.device !== undefined ? options.device : b.device !== undefined ? b.device : browserDevice);
     try {
       await project.ready;
     } catch (e) {

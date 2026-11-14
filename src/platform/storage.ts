@@ -1,3 +1,4 @@
+import type { DeviceStore } from '../collab/kept';
 import type { Doc, UserPreset } from '../model/types';
 import { boardKind, readBoard, readSerial } from '../model/load';
 import { upgradePreset } from '../model/video';
@@ -74,6 +75,8 @@ export interface Backend {
   /** The user's own device presets, shared by all boards. */
   loadPresets(): Promise<UserPreset[]>;
   savePresets(list: UserPreset[]): Promise<void>;
+  /** Where shared projects are kept on this device (see kept.ts): null, nowhere; unset, this browser's IndexedDB. */
+  device?: DeviceStore | null;
 }
 
 /** A board on disk was written by someone else (the command line, another tab) since it was read. */
