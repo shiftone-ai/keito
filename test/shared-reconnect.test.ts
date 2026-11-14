@@ -78,7 +78,8 @@ function onServer() {
     const ops = Number(db.prepare('SELECT count(*) AS n FROM ops WHERE project = ?').get(seed.id)?.n);
     const ydoc = new Y.Doc();
     Y.applyUpdate(ydoc, administer(data, (store) => store.load(seed.id))!);
-    return { ops, shape: at(boardDoc(ydoc, seed.board.id)?.nodes.find((n) => n.id === seed.shape.id)) };
+    const shape = boardDoc(ydoc, seed.board.id)?.nodes.find((n) => n.id === seed.shape.id);
+    return { ops, shape: at(shape), text: shape?.text };
   } finally {
     db.close();
   }
@@ -111,6 +112,48 @@ async function movedOffline(device: ReturnType<typeof memoryDevice>): Promise<vo
   await until(() => a.s().collab?.device === 'saved' && a.s().collab?.pending === 1, 5_000, 'the move to be kept on this device');
   a.session.dispose();
 }
+
+/** Type メモ at the end of the shape's name, as the board's editor does, and end the typing. */
+function typeAtEnd(e: Awaited<ReturnType<typeof editor>>): void {
+  const typing = e.s().typeInto({ id: seed.shape.id, field: 'text' }, false)!;
+  typing.edit([{ retain: typing.value().length }, { insert: 'メモ' }]);
+  typing.end(true);
+}
+
+describe('text typed while offline', { timeout: 30_000 }, () => {
+  it('is stored with the other edits once the server is back', async () => {
+    const a = await editor({ device: memoryDevice().store });
+    const { port } = server;
+    await server.kill();
+    await a.offline();
+    a.drag(seed.shape.id, 300, 40);
+    typeAtEnd(a);
+    server = await startServer(data, port);
+    await a.stored(15_000);
+    expect(onServer()).toMatchObject({ shape: { x: 300, y: 40 }, text: '図形メモ' });
+  });
+
+  it('comes back with the other edits when the server turns them away and they are taken out', async () => {
+    const device = memoryDevice();
+    const a = await editor({ device: device.store });
+    const { port } = server;
+    await server.kill();
+    await a.offline();
+    a.drag(seed.shape.id, 300, 40);
+    typeAtEnd(a);
+    await until(() => a.s().collab?.device === 'saved' && (a.s().collab?.pending ?? 0) > 1, 5_000, 'the move and the typing to be kept on this device');
+    a.session.dispose();
+    administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
+    server = await startServer(data, port);
+
+    const b = await editor({ device: device.store });
+    await b.refused();
+    expect(b.node(seed.shape.id)).toMatchObject({ x: 300, y: 40, text: '図形メモ' });
+    await b.s().collab!.recover!.copy();
+    await until(() => b.s().collab === null, 5_000, 'the copy to be opened');
+    expect(b.node(seed.shape.id)).toMatchObject({ x: 300, y: 40, text: '図形メモ' });
+  });
+});
 
 // A server killed and started again, and a page turned away, take longer than the default 5 s.
 describe('edits kept on this device that the server turns away on reconnecting', { timeout: 30_000 }, () => {
