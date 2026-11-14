@@ -163,6 +163,24 @@ test('two browsers show each other who is there, where they point and what they 
   expect(JSON.stringify(ydoc.toJSON())).not.toMatch(/あかね|ひかり|pointer/);
 });
 
+test('a page typing into a shape on the board is shown editing it, until it stops', async ({ browser }) => {
+  const [a, b] = await Promise.all([openLink(browser), openLink(browser)]);
+  await introduce(a, 'あかね');
+  await expect.poll(() => listed(b)).toEqual(['あ あかね 配置']);
+  const editing = marksOf(b, 'あかね').locator('.peer-tag.editing');
+
+  const shape = await middleOf(shapes(a).first());
+  await a.mouse.click(shape.x, shape.y);
+  await a.keyboard.press('Enter');
+  await expect(a.locator('.text-editor')).toBeFocused();
+  await a.keyboard.type('X');
+  await expect(editing).toHaveCount(1);
+  await a.keyboard.press('Escape');
+  await expect(editing).toHaveCount(0);
+  // Still selected, so still outlined.
+  await expect(marksOf(b, 'あかね').locator('rect[fill="none"]')).toHaveCount(1);
+});
+
 test('a drag called off, cut off with its connection, or of a node someone else deletes, leaves no mark, and the place last written', async ({ browser }) => {
   let relay: Relay | null = null;
   try {
@@ -195,6 +213,9 @@ test('a drag called off, cut off with its connection, or of a node someone else 
     await a.locator('.toolbar button[aria-label="四角"]').click();
     const area = (await a.locator('#canvas').boundingBox())!;
     await a.mouse.click(area.x + area.width / 2, area.y + area.height / 2);
+    // Put down, the box opens its text to type into; left empty, it stays.
+    await expect(a.locator('.text-editor')).toBeFocused();
+    await a.keyboard.press('Escape');
     const boxes = (page: Page) => page.locator('#canvas rect[width="140"][height="60"]:not([fill="none"])');
     await expect(boxes(b)).toHaveCount(1);
     const box = (await boxes(b).first().getAttribute('x'))!;

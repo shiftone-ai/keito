@@ -16,7 +16,7 @@ function Tag({ at, peer, k, pencil }: { at: Pt; peer: Peer; k: number; pencil?: 
   const icon = pencil ? 12 : 0;
   const w = measure(peer.name, `600 ${TAG_FONT}px ${UI_FONT}`) + TAG_PAD * 2 + icon;
   return (
-    <g transform={`translate(${at.x},${at.y}) scale(${1 / k})`}>
+    <g className={pencil ? 'peer-tag editing' : 'peer-tag'} transform={`translate(${at.x},${at.y}) scale(${1 / k})`}>
       <rect width={w} height={TAG_H} rx={4} fill={peer.color} />
       {pencil && <path d="M6 12.5l.6-2.6 5-5 2 2-5 5zM10.6 5.9l2 2" fill="none" stroke="#fff" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />}
       <text x={TAG_PAD + icon} y={mid(TAG_H / 2, TAG_FONT)} fontSize={TAG_FONT} fontWeight={600} fill="#fff" fontFamily={UI_FONT}>
