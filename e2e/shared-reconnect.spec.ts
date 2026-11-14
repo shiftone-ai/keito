@@ -83,6 +83,11 @@ test('a move made offline, then turned away as the invite was revoked, is shown 
   administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
   server = await startServer(data, port);
   ({ context, page } = await launch(baseURL, told));
+  // Every text the banner and the save state show, as each is drawn.
+  await page.addInitScript(() => {
+    const shown: string[] = ((window as unknown as { shown: string[] }).shown = []);
+    new MutationObserver(() => shown.push(['.rev-banner.refused', '.save-state'].map((at) => document.querySelector(at)?.textContent ?? '').join(' | '))).observe(document, { subtree: true, childList: true, characterData: true });
+  });
   try {
     await page.goto(`/#/s/${project}`);
     const banner = page.locator('.rev-banner.refused');
@@ -90,6 +95,8 @@ test('a move made offline, then turned away as the invite was revoked, is shown 
     await expect(banner).toContainText('未送信の変更 1 件は送れません');
     await expect(page.locator('.save-state')).toContainText('共同編集先に送れません');
     await expect(page.locator('.save-state')).toContainText('本端末に保存済み');
+    // Kept on this device all along, they are never said to be lost, even while the refusal is being written.
+    expect((await page.evaluate(() => (window as unknown as { shown: string[] }).shown)).filter((t) => t.includes('失われます'))).toEqual([]);
     expect(await placeOf(page)).toEqual(moved);
     await expect(page.locator('.toolbar button[aria-label="四角"]')).toHaveCount(0);
     expect(storedPlace()).toEqual({ x: 0, y: 0 });

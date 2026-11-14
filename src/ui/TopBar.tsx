@@ -79,7 +79,8 @@ function SharedSaveState({ collab, saving, saveError, project }: { collab: Colla
       <span className="save-state error" title={saveError ?? undefined}>
         <span>
           共同編集先に送れません
-          <small>{device === 'saved' ? '本端末に保存済み' : `閉じると未送信の ${pending} 件が失われます`}</small>
+          {/* Not said while the copy is being written: the write says which, a moment later. */}
+          {device !== 'saving' && <small>{device === 'saved' ? '本端末に保存済み' : `閉じると未送信の ${pending} 件が失われます`}</small>}
         </span>
       </span>
     );

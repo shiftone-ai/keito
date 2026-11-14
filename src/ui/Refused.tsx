@@ -20,9 +20,11 @@ export function RefusedBanner() {
   const recover = useStore((s) => s.collab?.recover);
   const refusal = useStore((s) => s.collab?.refusal);
   const pending = useStore((s) => s.collab?.pending);
-  const kept = useStore((s) => s.collab?.device === 'saved');
+  const device = useStore((s) => s.collab?.device);
   const [busy, setBusy] = useState(false);
   if (!recover || !refusal) return null;
+  // Not said while the copy is being written: the write says which, a moment later.
+  const fate = device === 'saved' ? 'が、この端末に残っています。' : device === 'saving' ? '。' : '。閉じると失われます。';
   // Not taken again while one is under way: a second click would write the boards twice.
   const settle = (how: () => Promise<unknown>) => {
     setBusy(true);
@@ -33,7 +35,7 @@ export function RefusedBanner() {
       <span className="why" role="alert">
         {WARN}
         <span>
-          <b>{refusalText(refusal)}</b>。未送信の変更 {pending} 件は送れません{kept ? 'が、この端末に残っています。' : '。閉じると失われます。'}
+          <b>{refusalText(refusal)}</b>。未送信の変更 {pending} 件は送れません{fate}
         </span>
       </span>
       <span className="actions">
