@@ -3,6 +3,8 @@ import type { SharedBoardInfo } from '../collab/boards';
 import type { DeviceStore } from '../collab/kept';
 import type { PictureDevice, SharedPictures } from '../collab/pictures';
 import type { EditKind } from '../collab/scope';
+import type { Me } from '../collab/me';
+import type { Peer } from '../collab/presence';
 import type { BoardManagement } from '../collab/tabs';
 import { sharedTarget } from '../collab/target';
 import { localEdits } from './edits';
@@ -26,6 +28,7 @@ import { sampleBoards } from './sample';
 import { registerSignals } from './signals';
 import { type Entry, type ShareNode, catalog, newKey, pull, stamp, takeFrom } from './shared';
 import { type Doc, type Edge, type Node, type Rect, type Revision, type UserPreset, emptyMeta } from './types';
+import type { Pt } from './types';
 
 /** A board of this machine takes every edit. */
 const takesAll = (): boolean => true;
@@ -94,6 +97,10 @@ export interface CollabState extends ShareStatus, Steps {
   takes(what: EditKind): boolean;
   /** The project's pictures as this page has them: how each stands, to be shown. */
   pictures: SharedPictures;
+  /** Tell the others in the project where this page's pointer is on the board on screen (null: off it). */
+  point(at: Pt | null): void;
+  /** Show this device's user to the others as `me`, and say who they are shown as (see me.ts). */
+  introduce(me: Me): Me;
 }
 
 export interface EditOperation {
@@ -139,6 +146,8 @@ export interface State {
    * never to the boards folder or this browser, and `saving` says whether the server has stored them.
    */
   collab: CollabState | null;
+  /** The others in the shared project on screen, as they show themselves (see presence.ts); none for a board of this machine. */
+  peers: Peer[];
 
   /** Start an operation and push the current doc onto the undo stack (before a drag or a burst). */
   checkpoint(context?: Partial<EditOperation>): void;
@@ -296,6 +305,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       saveError: null,
       notice: null,
       collab: null,
+      peers: [],
       presets: [],
       others: [],
       placing: null,
@@ -887,6 +897,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
         else frame(useStore.getState().fit);
       },
       refused: (refusal) => leaveShared(refusalText(refusal), project.status().pending),
+      watch: (hear) => useStore.subscribe(hear),
     });
     target = shared;
     shared.start();

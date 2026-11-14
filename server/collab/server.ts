@@ -87,6 +87,12 @@ export function collabServer(store: CollabStore, options: { port: number; addres
       if (type === messageYjsSyncStep1) connection.sendStateless(writeAccess(admitted(connection).role));
     },
 
+    async beforeHandleAwareness({ connection, document, states }) {
+      // Hocuspocus ties a client to its connection only when it first hears of it: a page back on a
+      // new connection would stay on the others' screens once that connection closes.
+      if (connection) for (const client of states.keys()) document.getClients(connection).add(client);
+    },
+
     async onLoadDocument({ documentName }) {
       const state = store.load(documentName);
       if (!state) throw refusal(documentName, 'not-initialized');

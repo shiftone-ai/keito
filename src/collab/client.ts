@@ -8,6 +8,7 @@ import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
 import { type PictureDevice, projectPictures } from './pictures';
+import { projectPresence } from './presence';
 import { type Refusal, type Role, readAccess, readAnswer, readArrival, readLetGo, writeCommit, writeCredential } from './protocol';
 import type { TextAt, TextSession } from '../model/target';
 import { typeIntoBoard } from './typing';
@@ -115,6 +116,8 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
   /** The copy kept here, as it is put in the Y.Doc: not an edit of this client, nor a change to keep. */
   const fromDevice = Symbol('kept on this device');
   let provider: HocuspocusProvider | null = null;
+  /** What this page tells the others in the project of itself, and hears of them, on each connection. */
+  const presence = projectPresence();
 
   async function start(): Promise<void> {
     const kept = await copy.load();
@@ -132,6 +135,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       notify();
     }
     provider = connect();
+    presence.attach(provider);
   }
 
   const connect = (): HocuspocusProvider => new HocuspocusProvider({
@@ -271,6 +275,8 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
     deletedBoards: (): SharedBoardInfo[] => deletedBoardList(ydoc),
     /** A board as it is now; null for one deleted, or not in the project. */
     board: (id: string): Doc | null => boardDoc(ydoc, id),
+    /** Who else is in the project, and what this page tells them of itself (see presence.ts). */
+    presence: { share: presence.share, peers: presence.peers, listen: presence.listen },
     /** Hear of every change: to the project (here or from others) and to this connection's status. */
     listen(hear: () => void): () => void {
       listeners.add(hear);
@@ -342,6 +348,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       if (joined) copy.stop();
       histories.forEach((h) => h.destroy());
       pictures.close();
+      presence.close();
       provider?.destroy();
       ydoc.destroy();
     },
