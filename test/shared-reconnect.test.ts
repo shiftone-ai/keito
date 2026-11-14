@@ -221,6 +221,34 @@ describe('edits kept on this device that the server turns away on reconnecting',
     expect(device.kept.size).toBe(0);
   });
 
+  it('taken out while another board is opened meanwhile, leave that board on screen', async () => {
+    const device = memoryDevice();
+    const { port } = server;
+    await movedOffline(device);
+    administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
+    server = await startServer(data, port);
+    const b = await editor({ device: device.store });
+    await b.refused();
+    let release = (): void => {};
+    const held = new Promise<void>((r) => (release = r));
+    const save = b.disk.backend.save;
+    b.disk.backend.save = async (doc, force) => {
+      await held;
+      return save(doc, force);
+    };
+
+    const copying = b.s().collab!.recover!.copy();
+    b.s().openBoard('local');
+    await until(() => b.s().doc.id === 'local', 5_000, 'the board of this machine to be opened');
+    release();
+    await copying;
+    // Given time to open the copy, it does not.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.s().doc.id).toBe('local');
+    expect([...b.disk.box.kept.values()].some(({ doc }) => doc.meta.project === '共有テスト のコピー')).toBe(true);
+    expect(device.kept.size).toBe(0);
+  });
+
   it('are not let go by taking out a project left with no board', async () => {
     const device = memoryDevice();
     const a = await editor({ device: device.store });

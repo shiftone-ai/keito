@@ -89,6 +89,8 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   let switching = false;
   /** Set once the server has turned this page away, or the edits it turned away are taken out or let go (see recover): the session is leaving the project. */
   let leaving = false;
+  /** Set once the target is closed: something else is on screen (see close). */
+  let closed = false;
   const viewer = (): boolean => project.status().role === 'viewer';
   /** Set while the server has turned away edits of this page: the project is on screen as this page holds it, to look at and take them out. */
   const refused = (): boolean => project.status().link === 'refused';
@@ -112,17 +114,20 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     async copy() {
       const boards = tabOrder(project.boards()).flatMap((b) => project.board(b.id) ?? []);
       if (!boards.length) return host.say('この共有案件には、手元にコピーするボードがありません');
-      const ids = await host.keepLocally(boards, `${project.title()} のコピー`);
+      const title = project.title();
+      const ids = await host.keepLocally(boards, `${title} のコピー`);
       if (!ids) return;
       leaving = true;
       await project.discard();
-      if (ids[0]) host.openLocal(ids[0]);
-      host.say(`共有案件「${project.title()}」のボード ${ids.length} 枚を、手元のボードにコピーしました`);
+      // Not put on screen once another board has been opened meanwhile: it would take that one's place.
+      if (ids[0] && !closed) host.openLocal(ids[0]);
+      host.say(`共有案件「${title}」のボード ${ids.length} 枚を、手元のボードにコピーしました`);
     },
     async rejoin() {
       leaving = true;
       await project.discard();
-      host.rejoin();
+      // Not opened anew once another board has been opened meanwhile: it would take that one's place.
+      if (!closed) host.rejoin();
     },
   };
 
@@ -296,6 +301,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     },
     start: tabs.start,
     close() {
+      closed = true;
       peers.close();
       unshare();
       stop();
