@@ -1357,6 +1357,32 @@ td a {
   border-bottom: 1px solid #eab308;
   font-size: 12.5px;
 }
+/* A shared project whose server turns away edits of this page: why, and what to do with them */
+.rev-banner.refused {
+  flex-wrap: wrap;
+  background: #fef2f2;
+  border-bottom-color: #fca5a5;
+}
+.rev-banner.refused .why {
+  display: flex;
+  flex: 1 1 20em;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.rev-banner.refused .why > svg,
+.rev-banner.refused b {
+  color: var(--danger);
+}
+.rev-banner.refused .why > svg {
+  flex: none;
+}
+.rev-banner.refused .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
 
 .signals {
   display: flex;
