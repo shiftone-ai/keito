@@ -155,9 +155,14 @@ export function shareKey(ydoc: Y.Doc, at: DeviceAt): string | null {
   if (!node) return null;
   const placed = node.get('shared');
   if (isString(placed)) return placed as string;
-  const key = uuid();
+  const devices = sharedDevices(ydoc);
+  // Not a new key each time: two people linking to the device at once, before either hears of the
+  // other, would make two shared devices of it. A new key only where a shared device the device was
+  // once placed from (unlinked since) keeps that one.
+  const named = `${at.board}/${at.node}`;
+  const key = devices.has(named) ? uuid() : named;
   const record = new Y.Map<unknown>();
-  sharedDevices(ydoc).set(key, record);
+  devices.set(key, record);
   record.set('text', new Y.Text(textOf(node.get('text'))));
   for (const k of SHARED) {
     const v = node.get(k);

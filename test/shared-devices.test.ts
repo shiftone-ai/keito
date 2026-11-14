@@ -312,6 +312,30 @@ describe('a device placed on boards of a shared project as one shared device', (
     }
   });
 
+  it('makes one shared device of a device two editors link to at once from two boards, before either hears of the other', async () => {
+    const a = await editor();
+    const b = await editor();
+    const pc = a.add('pc', 300, 0);
+    const back = a.addBoard('裏');
+    const one = a.add('pc');
+    const side = a.addBoard('横');
+    const other = a.add('pc');
+    await until(() => !!b.device(other.id, side), 5_000, 'the boards to reach the other editor');
+    a.s().openBoard(back);
+    b.s().openBoard(side);
+    const { port } = server;
+    await server.kill();
+    await until(() => a.s().collab?.link === 'offline' && b.s().collab?.link === 'offline', 5_000, 'the server to be missed');
+
+    a.s().linkTo(one.id, a.entry(seed.board.id, pc.id));
+    b.s().linkTo(other.id, b.entry(seed.board.id, pc.id));
+    server = await startServer(data, port);
+    for (const x of [a, b]) {
+      const keys = () => [x.device(pc.id, seed.board.id)?.shared, x.device(one.id, back)?.shared, x.device(other.id, side)?.shared];
+      await until(() => !!keys()[0] && keys().every((k) => k === keys()[0]), 15_000, 'the three devices to be placed from one shared device');
+    }
+  });
+
   it('keeps the host name and IP software placed on two software boards showed, once it runs on no device', async () => {
     const a = await editor();
     const pc = a.add('pc', 300, 0);
