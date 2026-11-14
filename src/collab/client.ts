@@ -4,7 +4,7 @@ import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
-import { type DeviceLink, linkedTo, sharedDevices, writeLink } from './devices';
+import { type DeviceLink, linkedTo, shareKey, sharedDevices, writeLink } from './devices';
 import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
@@ -291,17 +291,20 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     },
     /**
      * Link a device of a board to the project's shared devices, or unlink it, or delete a shared
-     * device (see writeLink): one commit, and a step to undo of its own on that board. A device of
-     * another board made a shared device to be linked to is part of the step.
+     * device (see writeLink): a step to undo of its own on that board, the other board's device linked
+     * to taking part in it. A shared device made of that device to link to is not: undoing the step
+     * leaves it to the devices others linked to it meanwhile.
      */
     linkDevice(board: string, link: DeviceLink): void {
       const at = editing() ? tracked(board) : null;
       if (!at) return;
-      const there = linkedTo(link)?.board;
-      const others = there === undefined ? null : boardNodes(ydoc, there);
+      const there = linkedTo(link);
+      const others = there ? boardNodes(ydoc, there.board) : null;
       if (others) at.history.addToScope(others);
       at.history.stopCapturing();
-      draw(board, () => writeLink(ydoc, at.nodes, link));
+      // Unmarked by a board (see tracked), it is in no board's history.
+      const key = there ? ydoc.transact(() => shareKey(ydoc, there), drawing) : null;
+      draw(board, () => writeLink(ydoc, at.nodes, link, key));
     },
     /**
      * Take back this client's last edit of a board still to be seen there: what others did since,

@@ -282,6 +282,22 @@ describe('a device placed on boards of a shared project as one shared device', (
     expect(b.device(pc.id)).toMatchObject({ x: 300, maker: 'Apple' });
   });
 
+  it('undoes a link made here, leaving the shared device to a device someone else linked to it meanwhile', async () => {
+    const { a, b, pc, twin, back, key } = await onTwoBoards();
+    const third = b.add('pc', 600, 0);
+    b.s().linkTo(third.id, b.entry(back, twin.id));
+    expect(b.device(third.id)?.shared).toBe(key);
+    await until(() => a.device(third.id, seed.board.id)?.shared === key, 5_000, "the other editor's link to arrive");
+
+    a.s().undo();
+    expect(a.device(twin.id)?.shared).toBeUndefined();
+    for (const x of [a, b]) {
+      await until(() => !!x.device(pc.id, seed.board.id) && !x.device(pc.id, seed.board.id)?.shared, 5_000, 'the undo to reach each editor');
+      expect(x.device(pc.id, seed.board.id)?.text).toBe(pc.text);
+      expect(x.device(third.id, seed.board.id)).toMatchObject({ shared: key, text: pc.text });
+    }
+  });
+
   it('keeps the host name and IP software placed on two software boards showed, once it runs on no device', async () => {
     const a = await editor();
     const pc = a.add('pc', 300, 0);

@@ -146,44 +146,47 @@ function runOn(node: YMap, key: string): void {
 }
 
 /**
- * The key of the shared device a device is placed from; one made of its name and particulars when
- * it has none yet, which it is then placed from. Null when it is gone.
+ * The key of the shared device the device at `at` is placed from; when it has none yet, the key of a
+ * new shared device made of its name and particulars (which writeLink places it from). Null when it
+ * is gone.
  */
-function keyOf(devices: YMap, node: YMap | null): string | null {
+export function shareKey(ydoc: Y.Doc, at: DeviceAt): string | null {
+  const node = deviceIn(boardNodes(ydoc, at.board), at.node);
   if (!node) return null;
   const placed = node.get('shared');
   if (isString(placed)) return placed as string;
   const key = uuid();
   const record = new Y.Map<unknown>();
-  devices.set(key, record);
+  sharedDevices(ydoc).set(key, record);
   record.set('text', new Y.Text(textOf(node.get('text'))));
   for (const k of SHARED) {
     const v = node.get(k);
     if (isString(v)) record.set(k, v);
   }
-  placeFrom(node, key);
   return key;
 }
 
 /**
  * Write a link of a device of a board (`nodes`) into the project (within the caller's transaction).
- * Linked to a device of another board (or running on one), that device is made a shared device first
- * when it is not one yet, whose particulars the linked device then shows. Unlinked, the device keeps
- * what it showed of the shared device as its own; neither the other devices placed from it nor any
- * other shared device change. Software stopped running on a device keeps the host name and IP it
- * showed, in the shared software it is placed from if any. A link of a device no longer there, or to
- * one, is dropped. Deleting a shared device leaves out of the drawing every device placed from it,
- * with the lines to them (see readLinks).
+ * Linked to a device of another board (or running on one), both are placed from the shared device
+ * under `key` (see shareKey), whose particulars they then show. Unlinked, the device keeps what it
+ * showed of the shared device as its own; neither the other devices placed from it nor any other
+ * shared device change. Software stopped running on a device keeps the host name and IP it showed,
+ * in the shared software it is placed from if any. A link of a device no longer there, or to one,
+ * is dropped. Deleting a shared device leaves out of the drawing every device placed from it, with
+ * the lines to them (see readLinks).
  */
-export function writeLink(ydoc: Y.Doc, nodes: YMap, link: DeviceLink): void {
+export function writeLink(ydoc: Y.Doc, nodes: YMap, link: DeviceLink, key: string | null): void {
   const devices = sharedDevices(ydoc);
   if (link.type === 'delete') return void devices.delete(link.device);
   const node = deviceIn(nodes, link.node);
   if (!node) return;
   const there = linkedTo(link);
   if (there) {
-    const key = keyOf(devices, deviceIn(boardNodes(ydoc, there.board), there.node));
-    if (key) (link.type === 'link' ? placeFrom : runOn)(node, key);
+    const other = deviceIn(boardNodes(ydoc, there.board), there.node);
+    if (!other || !key || !sharedOf(devices, key)) return;
+    if (other.get('shared') !== key) placeFrom(other, key);
+    (link.type === 'link' ? placeFrom : runOn)(node, key);
   } else if (link.type === 'unlink') {
     const record = placedFrom(node);
     if (!record) return;
