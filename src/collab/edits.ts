@@ -1,6 +1,6 @@
 import type { Doc, Edge, Node, Port } from '../model/types';
 import { type Run, runsBetween, withRuns } from './order';
-import { ATTRIBUTES, LINE_ATTRIBUTES, LINE_TEXTS, PORT_ATTRIBUTES, WRITTEN_ONCE, isShared } from './scope';
+import { ATTRIBUTES, DEVICE_LINKS, LINE_ATTRIBUTES, LINE_TEXTS, PORT_ATTRIBUTES, WRITTEN_ONCE, isShared } from './scope';
 
 /**
  * Edits of a shared board, read off the drawing the screen shows (within what scope.ts says a shared
@@ -88,7 +88,7 @@ const holdsOnly = (x: object, kept: ReadonlySet<string>): boolean => Object.entr
 /** Whether a shared board keeps all that `node` holds. */
 function addable(node: Node): boolean {
   if (!isShared(node.type)) return false;
-  return holdsOnly(node, new Set<string>([...NODE_APART, 'x', 'y', 'w', 'h', 'text', ...ATTRIBUTES[node.type], ...(WRITTEN_ONCE[node.type] ?? [])]));
+  return holdsOnly(node, new Set<string>([...NODE_APART, 'x', 'y', 'w', 'h', 'text', ...ATTRIBUTES[node.type], ...(WRITTEN_ONCE[node.type] ?? []), ...(node.type === 'device' ? DEVICE_LINKS : [])]));
 }
 
 /** Whether a shared board keeps all that a line holds. */
@@ -112,8 +112,12 @@ function changeOf(from: object, to: object, editable: ReadonlySet<string>, apart
   return change;
 }
 
+/** What an edit changes of a device placed from a shared device: its attributes and its name (the shared device's, see devices.ts). */
+const RENAMED = new Set<string>([...ATTRIBUTES.device, 'text']);
+
 function nodeChange(from: Node, to: Node): Change | null {
   if (from.type !== to.type || !isShared(to.type)) return null;
+  if (from.type === 'device' && to.type === 'device' && to.shared && from.shared === to.shared) return changeOf(from, to, RENAMED, NODE_APART);
   return changeOf(from, to, new Set(ATTRIBUTES[to.type]), to.type === 'legend' ? LEGEND_APART : NODE_APART);
 }
 const portChange = (from: Port, to: Port): Change | null => changeOf(from, to, PORT_EDITABLE, ID);

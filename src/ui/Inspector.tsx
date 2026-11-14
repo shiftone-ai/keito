@@ -17,6 +17,8 @@ export function Inspector() {
   const takes = useTakes();
   const remove = () => useStore.getState().removeIds(selection);
   const lines = doc.edges.filter((e) => selection.includes(e.id)).length;
+  // Not just 「削除」: beside 「すべてのボードから削除」 (see Shared.tsx) it would read as deleting the shared device too.
+  const placed = collab && doc.nodes.some((n) => n.type === 'device' && !!n.shared && selection.includes(n.id));
   if (noBoard) return <aside className="inspector" />;
   let body;
   if (selection.length === 0) body = <MetaPanel />;
@@ -64,7 +66,11 @@ export function Inspector() {
       ) : (
         body
       )}
-      {selection.length > 0 && <button className="danger wide" onClick={remove}>削除</button>}
+      {selection.length > 0 && (
+        <button className="danger wide" onClick={remove}>
+          {placed ? 'このボードから削除' : '削除'}
+        </button>
+      )}
     </aside>
   );
 }

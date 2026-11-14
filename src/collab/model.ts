@@ -15,12 +15,13 @@ import { validDrawing } from './valid';
  * project:   Y.Map { id, schema, title }
  * boards:    Y.Map<board id, Y.Map { id, title, kind, nodes: Y.Map<node id, Y.Map>, lines: Y.Map<line id, Y.Map> }>
  * deletions: Y.Map<mark, board id>
+ * devices:   Y.Map<key, Y.Map { text: Y.Text, maker, model, category, url, ip, host }>
  *
  * See nodes.ts for a node, lines.ts for a line, order.ts for the order they are drawn and listed in,
  * listOrder.ts for the orders of the lists put by hand. Which boards there are, and how one stays
- * deleted, is boards.ts's.
+ * deleted, is boards.ts's; the devices placed on several boards as one, devices.ts's.
  */
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 
 export interface ProjectSeed {
   id: string;
@@ -65,7 +66,9 @@ export function renameProject(ydoc: Y.Doc, title: string, origin: unknown): void
  * A board as the drawing, the tables and the exports read it; null for one deleted, or not in the
  * project. Nodes come in their drawing order, lines in the order they were put there (each by
  * `order`, then id), and the lists in the orders put by hand; a node of a kind this version cannot
- * show is left out rather than guessed at, and so is a line it cannot draw (see validDrawing).
+ * show is left out rather than guessed at, and so is a line it cannot draw (see validDrawing). A
+ * device placed from a shared device shows the shared device's name and particulars, software
+ * running on one its host name and IP (see devices.ts).
  */
 export function boardDoc(ydoc: Y.Doc, boardId: string): Doc | null {
   const board = liveBoard(ydoc, boardId);

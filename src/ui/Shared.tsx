@@ -44,6 +44,8 @@ function Choices({ entries }: { entries: Entry[] }) {
 export function SharedSection({ n }: { n: DeviceNode }) {
   const st = useStore.getState;
   const doc = useStore((s) => s.doc);
+  // A shared project keeps the device once, for all its boards: it can be deleted from all of them at once.
+  const once = useStore((s) => !!s.collab);
   const entries = useProject();
   const project = doc.meta.project?.trim();
   // Software is shared with software (the gear it runs on is chosen as its host instead), gear with gear.
@@ -82,9 +84,16 @@ export function SharedSection({ n }: { n: DeviceNode }) {
           ) : (
             <p className="hint">つながっているほかのボードは、今は見つかりません（消されたか、案件が変わったようです）。</p>
           )}
-          <button className="mini" data-tip="このボードのものだけを切り離します。ほかのボードのものはそのままです" onClick={() => st().unlink(n.id)}>
-            つなぎを外す
-          </button>
+          <div className="row panel-actions">
+            <button className="mini" data-tip="このボードのものだけを切り離します。ほかのボードのものはそのままです" onClick={() => st().unlink(n.id)}>
+              つなぎを外す
+            </button>
+            {once && (
+              <button className="mini danger" data-tip="つないだすべてのボードから、この機材とそのポート・線を消します（⌘Z で戻せます）" onClick={() => st().deleteSharedDevice(n.id)}>
+                すべてのボードから削除
+              </button>
+            )}
+          </div>
         </>
       ) : (
         <>

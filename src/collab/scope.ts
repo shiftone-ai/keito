@@ -41,6 +41,14 @@ export const WRITTEN_ONCE: Partial<Record<SharedType, readonly string[]>> = {
   legend: ['names'],
 };
 
+/**
+ * What a device names of the project's shared devices (see collab/devices.ts): the one it is placed
+ * from, and the one it runs on. Put with the device where the project has them; changed only by
+ * linking (see DeviceLink), never as an attribute. `sharedAt` is this machine's store's (see
+ * model/shared.ts): a device copied from one of its boards is put without it.
+ */
+export const DEVICE_LINKS = ['shared', 'runsOn', 'sharedAt'] as const;
+
 /** What of a device's port is changed on a shared board: each set whole. Its name is written once (see WRITTEN_ONCE); its place among the ports is changed as an order (see order.ts). */
 export const PORT_ATTRIBUTES = ['side', 'signal'] as const;
 
@@ -65,7 +73,7 @@ export const LINE_TEXTS = ['label', 'note'] as const;
 export type EditKind = Tool | 'typing' | 'fields' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'images', 'links', 'tidy']);
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'images', 'tidy']);
 
 /** Whether a shared board takes an edit of this kind. */
 export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
@@ -78,5 +86,5 @@ export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free']
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
-export const SHARED_SO_FAR = '図形・テキスト・機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順';
+export const SHARED_SO_FAR = '図形・テキスト・機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順、ほかのボードとの機材の共有と動作ホスト';
 export const NOT_SHARED_YET = 'インスペクタでの名前やメモなどの入力、ボードの設定';

@@ -201,6 +201,11 @@ export interface State {
   unlink(nodeId: string): void;
   /** Software runs on a device of another board (or on none). */
   runOn(nodeId: string, host: Entry | null): void;
+  /**
+   * Delete the shared device a device here is one with, from every board of the project, once the
+   * user agrees to what goes with it (a shared project's; this machine's boards keep copies alike instead).
+   */
+  deleteSharedDevice(nodeId: string): void;
   /** Open another board with one of its nodes selected and in view. */
   openAt(boardId: string, nodeId: string): void;
 }
@@ -534,7 +539,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
           adopt(shown, () => set({ doc: shown, past: [mine], future: [], selection: get().selection.filter((id) => fresh.nodes.some((n) => n.id === id) || fresh.edges.some((e) => e.id === id)), saving: 'saved' }));
         }),
       linkTo: (nodeId, to) =>
-        void inStore(async (b) => {
+        target.devices ? target.devices.link(nodeId, { board: to.board, node: to.node.id }) : void inStore(async (b) => {
           if (get().viewing) return;
           const current = scope();
           const key = await shareKey(b, to);
@@ -543,9 +548,9 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
           // The other board's particulars win: it is the one being linked to.
           sharing(() => get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...takeFrom(n, fresh), shared: key, sharedAt: fresh.sharedAt } : n)) })));
         }),
-      unlink: (nodeId) => get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...n, shared: undefined, sharedAt: undefined } : n)) })),
+      unlink: (nodeId) => (target.devices ? target.devices.unlink(nodeId) : get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...n, shared: undefined, sharedAt: undefined } : n)) }))),
       runOn: (nodeId, host) =>
-        void inStore(async (b) => {
+        target.devices ? target.devices.runOn(nodeId, host && { board: host.board, node: host.node.id }) : void inStore(async (b) => {
           if (get().viewing) return;
           const current = scope();
           const key = host ? ((await shareKey(b, host)) ?? undefined) : undefined;
@@ -553,13 +558,15 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
           get().mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId && n.type === 'device' ? { ...n, runsOn: key } : n)) }));
           pullIn();
         }),
-      openAt: (boardId, nodeId) =>
+      deleteSharedDevice: (nodeId) => (target.devices ? void target.devices.remove(nodeId) : refuse()),
+      openAt: (boardId, nodeId) => {
+        // A shared project's board is put on screen at once (see collab/tabs.ts).
+        if (!target.local && (boardId === get().doc.id || target.boards.open(boardId))) return showAt(nodeId);
         void run(async (b) => {
           if (boardId !== get().doc.id && (await switchTo(b, boardId)) !== 'shown') return;
-          set({ selection: [nodeId] });
-          // After the board has been fitted to the window: the node, in the middle.
-          frame(() => frame(() => centerOn(nodeId)));
-        }),
+          showAt(nodeId);
+        });
+      },
       deleteBoard: (id) => {
         if (!target.boards.remove(id)) removeLocal(id);
       },
@@ -575,10 +582,17 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     saving: save,
     boards: { open: openLocal, remove: removeLocal, address: showInUrl },
     local: { run, keepImage: keepImageLocal, changed, pickUp: () => void run(pickUp), readProject },
+    devices: null,
     refusal: null,
     close: () => {},
   };
   let target: Target = localTarget;
+
+  /** Select a node of the board on screen and, once the board has been fitted to the window, put it in the middle. */
+  function showAt(nodeId: string): void {
+    set({ selection: [nodeId] });
+    frame(() => frame(() => centerOn(nodeId)));
+  }
 
   /** Tell the user the board on screen does not take what was asked of it. */
   function refuse(): void {

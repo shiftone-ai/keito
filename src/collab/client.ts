@@ -4,6 +4,7 @@ import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
+import { type DeviceLink, linkedTo, shareKey, sharedDevices, writeLink } from './devices';
 import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
@@ -232,21 +233,39 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     notify();
   });
 
-  /** What a board holds, with its history begun before the first edit here so that the edit is in it. */
+  /**
+   * What a board holds, with its history begun before the first edit here so that the edit is in it.
+   * The project's shared devices are in every board's history, which takes in only the edits made on
+   * its own board (see draw).
+   */
   function tracked(board: string): (BoardParts & { history: Y.UndoManager }) | null {
     const nodes = boardNodes(ydoc, board);
     const lines = boardLines(ydoc, board);
     if (!nodes || !lines) return null;
+    const devices = sharedDevices(ydoc);
     let history = histories.get(board);
     // Not kept for nodes or lines made anew (the board taken off and put back): it would take back edits of ones no longer there.
     if (!history || history.scope[0] !== nodes || history.scope[1] !== lines) {
       history?.destroy();
       // Not grouped by how soon edits follow each other: each is a step of its own unless it joins the last (see edit).
-      history = new Y.UndoManager([nodes, lines], { trackedOrigins: new Set([drawing]), captureTimeout: Infinity });
+      history = new Y.UndoManager([nodes, lines, devices], {
+        trackedOrigins: new Set([drawing]),
+        captureTimeout: Infinity,
+        captureTransaction: (tr) => tr.origin !== drawing || tr.meta.get(EDITED) === board,
+      });
       histories.set(board, history);
     }
     return { nodes, lines, history };
   }
+
+  /** The board a drawing edit is made on (see draw). */
+  const EDITED = Symbol('board edited');
+  /** Make an edit of a board as one transaction of this page's drawing, which that board's history alone takes in. */
+  const draw = (board: string, write: () => void): void =>
+    ydoc.transact((tr) => {
+      tr.meta.set(EDITED, board);
+      write();
+    }, drawing);
 
   void start();
 
@@ -276,7 +295,24 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
       const at = editing() ? tracked(board) : null;
       if (!at) return;
       if (!joins) at.history.stopCapturing();
-      ydoc.transact(() => writeEdit(at, edit), drawing);
+      draw(board, () => writeEdit(at, edit));
+    },
+    /**
+     * Link a device of a board to the project's shared devices, or unlink it, or delete a shared
+     * device (see writeLink): a step to undo of its own on that board, the other board's device linked
+     * to taking part in it. A shared device made of that device to link to is not: undoing the step
+     * leaves it to the devices others linked to it meanwhile.
+     */
+    linkDevice(board: string, link: DeviceLink): void {
+      const at = editing() ? tracked(board) : null;
+      if (!at) return;
+      const there = linkedTo(link);
+      const others = there ? boardNodes(ydoc, there.board) : null;
+      if (others) at.history.addToScope(others);
+      at.history.stopCapturing();
+      // Unmarked by a board (see tracked), it is in no board's history.
+      const key = there ? ydoc.transact(() => shareKey(ydoc, there), drawing) : null;
+      draw(board, () => writeLink(ydoc, at.nodes, link, key));
     },
     /**
      * Take back this client's last edit of a board still to be seen there: what others did since,
@@ -299,7 +335,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
      */
     typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
       const parts = editing() ? tracked(board) : null;
-      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => ydoc.transact(write, drawing), history: parts.history, joins, editing });
+      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), history: parts.history, joins, editing });
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {

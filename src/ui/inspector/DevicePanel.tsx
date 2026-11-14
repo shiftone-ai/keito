@@ -165,7 +165,8 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
         {soft && takes('links') && <RunsOn n={n} />}
         {soft && n.runsOn && (
           <p className="hint">
-            ホスト名 {n.host || '—'}／IP {n.ip || '—'}（動作ホストの機材から）
+            ホスト名 {n.host || '—'}／IP {n.ip || '—'}
+            <span style={{ display: 'inline-block' }}>（動作ホストの機材から）</span>
           </p>
         )}
         {(networked || soft) && !(soft && n.runsOn) && (
