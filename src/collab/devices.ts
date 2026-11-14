@@ -169,10 +169,11 @@ function keyOf(devices: YMap, node: YMap | null): string | null {
  * Write a link of a device of a board (`nodes`) into the project (within the caller's transaction).
  * Linked to a device of another board (or running on one), that device is made a shared device first
  * when it is not one yet, whose particulars the linked device then shows. Unlinked, the device keeps
- * what it showed of the shared device as its own, as software stopped running on one keeps its host
- * name and IP; neither the other devices placed from it nor any other shared device change. A link
- * of a device no longer there, or to one, is dropped. Deleting a shared device leaves out of the
- * drawing every device placed from it, with the lines to them (see readLinks).
+ * what it showed of the shared device as its own; neither the other devices placed from it nor any
+ * other shared device change. Software stopped running on a device keeps the host name and IP it
+ * showed, in the shared software it is placed from if any. A link of a device no longer there, or to
+ * one, is dropped. Deleting a shared device leaves out of the drawing every device placed from it,
+ * with the lines to them (see readLinks).
  */
 export function writeLink(ydoc: Y.Doc, nodes: YMap, link: DeviceLink): void {
   const devices = sharedDevices(ydoc);
@@ -191,7 +192,8 @@ export function writeLink(ydoc: Y.Doc, nodes: YMap, link: DeviceLink): void {
     setEach(node, particulars);
     node.delete('shared');
   } else if (isString(node.get('runsOn'))) {
-    setEach(node, hostOf(sharedOf(devices, node.get('runsOn'))));
+    // Not on the node alone: placed from shared software, the node shows the shared software's.
+    setEach(placedFrom(node) ?? node, hostOf(sharedOf(devices, node.get('runsOn'))));
     node.delete('runsOn');
   }
 }

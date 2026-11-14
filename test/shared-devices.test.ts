@@ -281,4 +281,22 @@ describe('a device placed on boards of a shared project as one shared device', (
     await until(() => b.device(pc.id)?.text === pc.text, 5_000, 'the second undo to reach the other editor');
     expect(b.device(pc.id)).toMatchObject({ x: 300, maker: 'Apple' });
   });
+
+  it('keeps the host name and IP software placed on two software boards showed, once it runs on no device', async () => {
+    const a = await editor();
+    const pc = a.add('pc', 300, 0);
+    a.s().updateNode(pc.id, { ip: '192.168.0.10' });
+    const soft = a.addBoard('ソフト', 'software');
+    const td = a.add('td');
+    a.addBoard('ソフト2', 'software');
+    const td2 = a.add('td');
+    a.s().linkTo(td2.id, a.entry(soft, td.id));
+    a.s().runOn(td2.id, a.entry(seed.board.id, pc.id));
+    expect(a.device(td2.id)).toMatchObject({ host: pc.text, ip: '192.168.0.10' });
+
+    a.s().runOn(td2.id, null);
+    expect(a.device(td2.id)?.runsOn).toBeUndefined();
+    expect(a.device(td2.id)).toMatchObject({ host: pc.text, ip: '192.168.0.10' });
+    expect(a.device(td.id, soft)).toMatchObject({ host: pc.text, ip: '192.168.0.10' });
+  });
 });
