@@ -8,6 +8,7 @@ import type { Doc } from '../model/types';
 import { ask } from '../platform/io';
 import type { SharedProject } from './client';
 import { type BoardEdit, editBetween, isNoEdit, mergeEdits, noEdit, withEdit } from './edits';
+import { followPeers } from './peers';
 import { type LinkRefusal, refusalText } from './refusals';
 import { TURNED_AWAY, VIEW_ONLY } from './role';
 import { type EditKind, NOT_TAKEN, emptyTakes, sharedTakes } from './scope';
@@ -46,6 +47,8 @@ export interface Host {
   openLocal(id: string): void;
   /** Open the project anew from the server, this page holding nothing of it. */
   rejoin(): void;
+  /** Hear of every change to the session's state. */
+  watch(hear: (s: State, prev: State) => void): () => void;
 }
 
 /**
@@ -101,6 +104,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     opened: host.opened,
     say: host.say,
   });
+  const peers = followPeers(project.presence, host);
   const stop = project.listen(refresh);
   /** Managing the boards as a viewer is offered it: each asked for is refused, as the server would. */
   const viewOnly: BoardManagement = { add: host.refuse, rename: host.refuse, restore: host.refuse, renameProject: host.refuse };
@@ -136,7 +140,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     const unkept = s.pending > 0 && s.device === 'failed';
     const away = s.link === 'refused' && s.refusal ? refusalText(s.refusal) : null;
     return {
-      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: looking() ? viewOnly : tabs.manage, recover: away ? recover : null },
+      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: looking() ? viewOnly : tabs.manage, recover: away ? recover : null, point: peers.point, introduce: peers.introduce },
       saving: s.failure || unkept || away ? 'error' : s.pending ? 'saving' : 'saved',
       saveError: unkept ? s.deviceFailure : (away ?? s.failure),
     };
@@ -172,6 +176,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     unshare();
     unshare = next ? shareIds(next) : () => {};
     host.set({ doc: view(), viewing: null, past: [], future: [], selection: [], editing: null, others: [], placing: null, tool: 'select', ...status() });
+    peers.board(next);
   }
 
   /**
@@ -194,10 +199,13 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     const doc = sameBoard(shown, s.doc) ? s.doc : shown;
     const selection = stillIn(doc, s.selection);
     host.set({ doc, ...(selection.length === s.selection.length ? {} : { selection }), ...status() });
+    // Not left as last told: what others took off meanwhile would stay marked on their screens.
+    if (!isNoEdit(draft)) peers.during(shown, draft);
   }
 
   /** Write the edit of the operation just ended to the project, as one edit (sent to be stored). */
   function write(): void {
+    peers.settled();
     const edit = draft;
     draft = noEdit();
     if (!isNoEdit(edit)) project.edit(board, edit);
@@ -228,11 +236,13 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         draft = mergeEdits(draft, edit);
         host.set({ doc: view() });
         if (record) host.commitOperation();
+        else peers.during(host.get().doc, draft);
       },
       // Not undone by putting back a whole earlier board: that would undo others' edits too.
       begin: () => {},
       end: write,
       drop() {
+        peers.settled();
         draft = noEdit();
         refresh();
         host.set({ selection: [], editing: null });
@@ -286,6 +296,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     },
     start: tabs.start,
     close() {
+      peers.close();
       unshare();
       stop();
       project.close();
