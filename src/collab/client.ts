@@ -8,6 +8,8 @@ import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
 import { type Refusal, type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
+import type { TextAt, TextSession } from '../model/target';
+import { typeIntoBoard } from './typing';
 
 /** Where a shared project is, and the credential that lets this client in. */
 export interface SharedJoin {
@@ -283,6 +285,15 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
     steps(board: string): Steps {
       const h = editing() ? histories.get(board) : null;
       return { undo: !!h?.canUndo(), redo: !!h?.canRedo() };
+    },
+    /**
+     * Type into a text of a board (see typing.ts): what is typed is this client's edit of the board, a
+     * step to undo of its own or, `joins`, part of its last. Null when the text is not there, or when
+     * no longer editing the project.
+     */
+    typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
+      const parts = editing() ? tracked(board) : null;
+      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => ydoc.transact(write, drawing), history: parts.history, joins, editing });
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {
