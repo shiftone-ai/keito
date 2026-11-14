@@ -114,11 +114,11 @@ test('two browsers keep a PC placed on two boards as one: an IP given on one boa
   await a.page.keyboard.press('ControlOrMeta+z');
   await expect(device(a.page, 'PC')).toHaveCount(1);
   await expect(device(b.page, 'PC')).toHaveCount(1);
-  // Read off the list, not by clicking the PC again: two clicks on it this soon open its name for typing.
+  // Not clicked again on either page: a second click on the PC this soon is a double-click, which opens its name.
   expect(await networkRows(b.page)).toEqual(['PC  192.168.0.10']);
 
-  // The name typed on the second board is the system board's too, beside the IP given there.
-  await clickOn(a.page, device(a.page, 'PC'));
+  // The name typed on the second board is the system board's too, beside the IP given there. The PC is all that board has.
+  await a.page.keyboard.press('ControlOrMeta+a');
   await a.page.keyboard.press('Enter');
   await expect(a.page.locator('.text-editor')).toBeFocused();
   await a.page.keyboard.press('End');
