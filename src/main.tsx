@@ -2,18 +2,17 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { joinInAddress } from './collab/join';
+import { SHARED_PROJECTS } from './collab/trial';
 import { boot, openCollab, useStore } from './model/store';
 import './styles.css';
 import './ui/tips';
 
-/** Shared projects (co-editing through a collaboration server) are under trial: on only in a build made with VITE_KEITO_COLLAB=1. */
-const COLLAB = import.meta.env.VITE_KEITO_COLLAB === '1';
-
+const opening = (SHARED_PROJECTS && joinInAddress()) || undefined;
 // In the desktop app, boards are kept through its own store; in a browser, the one found (see connect).
-if ('__TAURI_INTERNALS__' in window) void import('./platform/tauri').then((m) => m.startDesktop());
-else void boot(undefined, (COLLAB && joinInAddress()) || undefined);
+if ('__TAURI_INTERNALS__' in window) void import('./platform/tauri').then((m) => m.startDesktop(opening));
+else void boot(undefined, opening);
 
-if (COLLAB)
+if (SHARED_PROJECTS)
   window.addEventListener('hashchange', () => {
     const join = joinInAddress();
     if (join && useStore.getState().ready && useStore.getState().collab?.project !== join.project) void openCollab(join);
