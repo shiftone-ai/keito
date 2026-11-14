@@ -21,6 +21,11 @@ export interface Target {
   /** What only this machine's store keeps of the board; null where the board is kept elsewhere. */
   local: LocalStore | null;
   /**
+   * Keep a picture for the board; resolves to the `src` an image node should hold. Rejects, in words
+   * for the user, where the board takes no picture.
+   */
+  keepImage(dataUrl: string): Promise<string>;
+  /**
    * Said when the board is asked for what it does not take: an edit `edits.takes` turns away, or
    * something of this machine's store where it is kept elsewhere. null where it takes all of it.
    */
@@ -107,12 +112,10 @@ export interface Boards {
   address(id: string): void;
 }
 
-/** What only this machine's store keeps of the board: its history, its project's other boards, its pictures, and what is written to it elsewhere. */
+/** What only this machine's store keeps of the board: its history, its project's other boards, and what is written to it elsewhere. */
 export interface LocalStore {
   /** Run an action on the board in the store (its history, its project). */
   run(fn: StoreAction): Promise<void>;
-  /** Keep a picture for the board; the `src` an image node should hold. */
-  keepImage(dataUrl: string): Promise<string>;
   /** The state on screen changed (an edit, another board shown …): what follows from it in the store. */
   changed(s: State, prev: State): void;
   /** Take in the board as the store has it now (written elsewhere meanwhile). */

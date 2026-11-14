@@ -2,7 +2,7 @@ import { lookingNote, lookingOnly } from '../collab/role';
 import { NOT_SHARED_YET } from '../collab/scope';
 import { align, useStore, useTakes } from '../model/store';
 import { Section, Head } from './inspector/fields';
-import { MetaPanel } from './inspector/MetaPanel';
+import { MetaPanel, Underlays } from './inspector/MetaPanel';
 import { NodePanel } from './inspector/NodePanel';
 import { EdgePanel } from './inspector/EdgePanel';
 
@@ -58,9 +58,15 @@ export function Inspector() {
     <aside className="inspector">
       {collab && <p className="hint">{looking ? note : `共有中の案件「${doc.meta.project}」のボードです。試験中のため、${NOT_SHARED_YET}は、まだ共有できません。`}</p>}
       {!takes('settings') && !selection.length ? (
-        <fieldset className="plain" disabled>
-          {body}
-        </fieldset>
+        <>
+          {/* Not a setting of the board: the only way back to a picture laid under the drawing, which cannot be clicked. */}
+          <fieldset className="plain underlays" disabled={looking}>
+            <Underlays />
+          </fieldset>
+          <fieldset className="plain" disabled>
+            {body}
+          </fieldset>
+        </>
       ) : (
         body
       )}

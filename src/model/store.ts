@@ -1,6 +1,7 @@
 import type { ShareStatus, SharedJoin, Steps } from '../collab/client';
 import type { SharedBoardInfo } from '../collab/boards';
 import type { DeviceStore } from '../collab/kept';
+import type { PictureDevice, SharedPictures } from '../collab/pictures';
 import type { EditKind } from '../collab/scope';
 import type { Me } from '../collab/me';
 import type { Peer } from '../collab/presence';
@@ -18,6 +19,7 @@ import { create } from 'zustand';
 import { type Backend, type BoardInfo, Conflict, type TrashedBoard, connect, externalize, localBoards } from '../platform/storage';
 import { shortcuts, tell } from '../platform/io';
 import { browserDevice } from '../platform/indexeddb';
+import { browserPictures } from '../platform/pictureDevice';
 import { type BoardKind, KINDS, kindOf } from './kinds';
 import { SEQUENCE_SAMPLE } from './sequence';
 import { BOARD_ID, readBoard } from './load';
@@ -97,6 +99,8 @@ export interface CollabState extends ShareStatus, Steps {
   recover: Recovery | null;
   /** What the board takes (see Target.takes), without telling the user anything. */
   takes(what: EditKind): boolean;
+  /** The project's pictures as this page has them: how each stands, to be shown. */
+  pictures: SharedPictures;
   /** Tell the others in the project where this page's pointer is on the board on screen (null: off it). */
   point(at: Pt | null): void;
   /** Show this device's user to the others as `me`, and say who they are shown as (see me.ts). */
@@ -212,9 +216,10 @@ export interface State {
 /**
  * A session owns its editor, pending work and page subscriptions. `page`: the session is the page's
  * (it follows and shows the address, and hears the page close). `device`: where shared projects are
- * kept on this device; unset, where the store booted says (see Backend.device).
+ * kept on this device; unset, where the store booted says (see Backend.device). `pictures`: where
+ * their pictures are; unset, this browser's, unless the projects are kept nowhere.
  */
-export function createEditSession(options: { page?: boolean; device?: DeviceStore | null } = {}) {
+export function createEditSession(options: { page?: boolean; device?: DeviceStore | null; pictures?: PictureDevice | null } = {}) {
   let disposed = false;
   let generation = 0;
   const active = (): boolean => !disposed;
@@ -578,7 +583,8 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     edits,
     saving: save,
     boards: { open: openLocal, remove: removeLocal, address: showInUrl },
-    local: { run, keepImage: keepImageLocal, changed, pickUp: () => void run(pickUp), readProject },
+    local: { run, changed, pickUp: () => void run(pickUp), readProject },
+    keepImage: keepImageLocal,
     refusal: null,
     close: () => {},
   };
@@ -859,7 +865,9 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     // Loaded only when a shared project is opened: Yjs and the provider stay out of the app's first load.
     const { joinProject } = await import('../collab/client');
     if (!current()) return false;
-    const project = joinProject(join, options.device !== undefined ? options.device : b.device !== undefined ? b.device : browserDevice);
+    const device = options.device !== undefined ? options.device : b.device !== undefined ? b.device : browserDevice;
+    // Not kept where the project is not (the desktop app): an unsent picture would outlive the edit that placed it.
+    const project = joinProject(join, device, options.pictures !== undefined ? options.pictures : device === null ? null : browserPictures);
     try {
       await project.ready;
     } catch (e) {
@@ -1252,8 +1260,8 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     projectTimer = window.setTimeout(() => void readProject(), 600);
   }
 
-  /** Store a picture for the current board; returns the `src` an image node should keep (the picture itself where the board is kept elsewhere). */
-  const storeImage = (dataUrl: string): Promise<string> => (target.local ? target.local.keepImage(dataUrl) : Promise.resolve(dataUrl));
+  /** Store a picture for the current board; returns the `src` an image node should keep (see Target.keepImage). */
+  const storeImage = (dataUrl: string): Promise<string> => target.keepImage(dataUrl);
   async function keepImageLocal(dataUrl: string): Promise<string> {
     const b = backend;
     const current = scope();

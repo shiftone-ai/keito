@@ -73,7 +73,7 @@ export interface SharedTarget extends Target {
  * project as one edit when its operation ends, and undo takes back this page's own edits only. The
  * collaboration server stores them, and `saving` says whether it has. It holds nothing of this
  * machine's store: the board can neither be written there nor take part in what is kept there
- * (history, other boards, pictures). Which of the project's boards is on screen, and managing them,
+ * (history, other boards); its pictures are the project's (see pictures.ts). Which of the project's boards is on screen, and managing them,
  * is tabs.ts's. A viewer (see ShareStatus.role) looks round and takes no edit.
  */
 export function sharedTarget(projectId: string, project: SharedProject, host: Host): SharedTarget {
@@ -145,7 +145,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
     const unkept = s.pending > 0 && s.device === 'failed';
     const away = s.link === 'refused' && s.refusal ? refusalText(s.refusal) : null;
     return {
-      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: looking() ? viewOnly : tabs.manage, recover: away ? recover : null, point: peers.point, introduce: peers.introduce },
+      collab: { ...s, ...project.steps(board), unkept, project: projectId, boards: project.boards(), deleted: project.deletedBoards(), takes, manage: looking() ? viewOnly : tabs.manage, recover: away ? recover : null, pictures: project.pictures, point: peers.point, introduce: peers.introduce },
       saving: s.failure || unkept || away ? 'error' : s.pending ? 'saving' : 'saved',
       saveError: unkept ? s.deviceFailure : (away ?? s.failure),
     };
@@ -296,6 +296,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       },
     },
     local: null,
+    keepImage(dataUrl) {
+      return takes('images') ? project.pictures.keep(dataUrl) : Promise.reject(new Error(this.refusal ?? NOT_TAKEN));
+    },
     get refusal() {
       return refused() ? TURNED_AWAY : viewer() ? VIEW_ONLY : board ? NOT_TAKEN : NO_BOARD;
     },

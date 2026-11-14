@@ -1,5 +1,7 @@
 import type { BoardKind } from '../model/kinds';
 import type { Tool } from '../model/store';
+import type { Node } from '../model/types';
+import { isSharedSrc } from './pictureRef';
 
 /**
  * What a shared board takes so far: the kinds of node it holds, what of a node is changed there, and
@@ -8,8 +10,8 @@ import type { Tool } from '../model/store';
  * as an edit (see editBetween). Kept apart from Yjs so that the app's first load does not carry it.
  */
 
-/** The kinds of node a shared board holds: pictures and sequence diagrams are not shared yet. */
-const SHARED_TYPES = ['shape', 'sticky', 'text', 'frame', 'device', 'junction', 'legend'] as const;
+/** The kinds of node a shared board holds: sequence diagrams are not shared yet. */
+const SHARED_TYPES = ['shape', 'sticky', 'text', 'frame', 'device', 'junction', 'legend', 'image'] as const;
 export type SharedType = (typeof SHARED_TYPES)[number];
 
 export const isShared = (type: unknown): type is SharedType => SHARED_TYPES.includes(type as SharedType);
@@ -26,6 +28,7 @@ export const ATTRIBUTES = {
   device: ['maker', 'model', 'category', 'url', 'watts', 'capacity', 'color', 'qty', 'price', 'vendor', 'venue', 'ip', 'host'],
   junction: [],
   legend: ['devices', 'hidden'],
+  image: ['src', 'under', 'opacity', 'captionAt', 'fontSize'],
 } as const satisfies Record<SharedType, readonly string[]>;
 export type Attribute = (typeof ATTRIBUTES)[SharedType][number];
 
@@ -39,7 +42,14 @@ export type Attribute = (typeof ATTRIBUTES)[SharedType][number];
 export const WRITTEN_ONCE: Partial<Record<SharedType, readonly string[]>> = {
   device: ['note'],
   legend: ['names'],
+  image: ['caption'],
 };
+
+/**
+ * Whether a shared board can hold a node as it stands: a picture only as one of the project's (see
+ * pictureRef.ts), never one held inside the board or kept on this machine, which no one else could see.
+ */
+export const holdable = (n: Node): boolean => n.type !== 'image' || isSharedSrc(n.src);
 
 /** What of a device's port is changed on a shared board: each set whole. Its name is written once (see WRITTEN_ONCE); its place among the ports is changed as an order (see order.ts). */
 export const PORT_ATTRIBUTES = ['side', 'signal'] as const;
@@ -65,10 +75,16 @@ export const LINE_TEXTS = ['label', 'note'] as const;
 export type EditKind = Tool | 'typing' | 'fields' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'images', 'links', 'tidy']);
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'links', 'tidy']);
 
-/** Whether a shared board takes an edit of this kind. */
-export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
+/** Whether the app runs in the desktop app, as main.tsx tells. */
+const inDesktopApp = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * Whether a shared board takes an edit of this kind. Not pictures in the desktop app yet (#25): it
+ * reaches the server by WebSocket only, so one put there would never be sent.
+ */
+export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what) && !(what === 'images' && inDesktopApp());
 
 /** What a shared project with no board takes: looking round, nothing to draw on. */
 export const emptyTakes = (what: EditKind): boolean => what === 'select' || what === 'pan';
@@ -78,5 +94,5 @@ export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free']
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
-export const SHARED_SO_FAR = '図形・テキスト・機材を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順';
+export const SHARED_SO_FAR = '図形・テキスト・機材・画像を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順';
 export const NOT_SHARED_YET = 'インスペクタでの名前やメモなどの入力、ボードの設定';

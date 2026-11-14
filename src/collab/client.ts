@@ -7,8 +7,9 @@ import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, dele
 import type { BoardEdit } from './edits';
 import { type DeviceState, type DeviceStore, type KeptProject, keepCopy } from './kept';
 import { type BoardParts, SCHEMA, boardDoc, projectTitle, renameProject, writeEdit } from './model';
+import { type PictureDevice, projectPictures } from './pictures';
 import { projectPresence } from './presence';
-import { type Role, readAccess, readAnswer, readLetGo, writeCommit, writeCredential } from './protocol';
+import { type Role, readAccess, readAnswer, readArrival, readLetGo, writeCommit, writeCredential } from './protocol';
 import { type LinkRefusal, refusalOf, refusalText } from './refusals';
 import type { TextAt, TextSession } from '../model/target';
 import { typeIntoBoard } from './typing';
@@ -23,11 +24,11 @@ export interface SharedJoin {
 
 /**
  * How this client stands with the server. `role`: what the server let this client in to do, null until
- * it has said (the project opened from the copy kept on this device, offline); `pending`: edits made
- * here and not yet confirmed stored (once 'refused', never to be); `failure`: why the last store
- * failed (they are sent again); `refusal`: why the link is 'refused'. `device`: whether the project
- * is kept on this device as this page holds it (see kept.ts), and `deviceFailure`, why not while it
- * is 'failed'.
+ * it has said (the project opened from the copy kept on this device, offline); `pending`: edits and
+ * pictures (see pictures.ts) made here and not yet confirmed stored (edits, once 'refused', never to
+ * be); `failure`: why the last store failed (they are sent again); `refusal`: why the link is
+ * 'refused'. `device`: whether the project and its pictures still to be sent are kept on this device
+ * as this page holds them (see kept.ts), and `deviceFailure`, why not while it is 'failed'.
  */
 export interface ShareStatus {
   link: 'connecting' | 'online' | 'offline' | 'refused';
@@ -59,9 +60,10 @@ export interface Steps {
  * answers, or without it while offline; its unconfirmed edits are sent once the server has let this
  * client in again as an editor. Turned away (by the server, now or when last asked) with edits not
  * sent, the project stays as this device holds it, 'refused', never sending them, until `discard`:
- * the user takes them out or lets them go. Any other project opens only from the server.
+ * the user takes them out or lets them go. Any other project opens only from the server. Its pictures
+ * are kept on `pictureDevice` (see pictures.ts).
  */
-export function joinProject(join: SharedJoin, device: DeviceStore | null = null) {
+export function joinProject(join: SharedJoin, device: DeviceStore | null = null, pictureDevice: PictureDevice | null = null) {
   const ydoc = new Y.Doc();
   /** This page's own edits of the drawing: what its undo takes back. */
   const drawing = Symbol('drawing edit');
@@ -79,6 +81,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
   let retries = 0;
 
   const notify = (): void => listeners.forEach((hear) => hear());
+  const pictures = projectPictures(join, pictureDevice, notify);
 
   let settle: { resolve: () => void; reject: (e: Error) => void };
   const ready = new Promise<void>((resolve, reject) => {
@@ -153,6 +156,8 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
       if (gone) return refuse(gone);
       const role = readAccess(payload);
       if (role) return admit(role);
+      const arrived = readArrival(payload);
+      if (arrived) return pictures.arrived(arrived);
       const answer = readAnswer(payload);
       if (closed || !answer || !pending.has(answer.op)) return;
       // Not kept to send again: the server would turn it away each time.
@@ -263,7 +268,12 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
      * (no grant for the project, another schema) or cannot be reached before then.
      */
     ready,
-    status: (): ShareStatus => ({ ...status, pending: pending.size, device: copy.state(), deviceFailure: copy.failure() }),
+    status: (): ShareStatus => {
+      const p = pictures.status();
+      return { ...status, failure: status.failure ?? p.failure, pending: pending.size + p.unsent, device: p.unkept ? 'failed' : p.keeping ? 'saving' : copy.state(), deviceFailure: copy.failure() ?? p.unkept };
+    },
+    /** The project's pictures: those put on its boards here, and those of others, as this page has them. */
+    pictures,
     title: (): string => projectTitle(ydoc),
     boards: (): SharedBoardInfo[] => boardList(ydoc),
     /** The deleted boards, which `restoreBoard` brings back. */
@@ -334,6 +344,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
       retries = 0;
       sendAll();
       copy.changed();
+      pictures.retry();
     },
     /**
      * Disconnect for good. Edits not yet confirmed stay in the copy kept on this device (see
@@ -346,6 +357,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null)
       listeners.clear();
       if (joined) copy.stop();
       histories.forEach((h) => h.destroy());
+      pictures.close();
       presence.close();
       provider?.destroy();
       ydoc.destroy();
