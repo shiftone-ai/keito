@@ -365,9 +365,28 @@ describe('pictures on a shared board', () => {
     expect(a.s().collab?.unkept).toBe(true);
     expect(a.s().saveError).toMatch(/画像.*空き容量/);
     expect(a.images()).toHaveLength(2);
+
+    // Room made, and もう一度 pressed while the server has not answered yet.
+    a.pictures.failing = null;
+    await a.session.saveNow();
+    await until(() => a.s().collab?.unkept === false, 5_000, 'the picture to be kept on the device after all');
+    expect(a.pictures.unsent.size).toBe(2);
     net.set('a', 'PUT', undefined);
     net.release();
     await a.stored();
+  });
+
+  it('are not put on the board opened in place of the project while they were being kept', async () => {
+    const a = await person('a');
+    let release!: () => void;
+    a.pictures.hold = new Promise<void>((go) => (release = go));
+    const placing = a.insert(picture('閉じる前').dataUrl);
+    await until(() => a.s().collab?.device === 'saving', 5_000, 'the picture to be on its way to the device');
+    a.s().openBoard('local');
+    await until(() => a.s().doc.id === 'local', 5_000, 'the local board to open');
+    release();
+    await expect(placing).rejects.toThrow(/案件を閉じ/);
+    expect(a.images()).toHaveLength(0);
   });
 
   it('let the board be edited while a picture cannot be fetched, and show it once it can', async () => {

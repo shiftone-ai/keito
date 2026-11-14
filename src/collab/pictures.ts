@@ -124,6 +124,9 @@ function viewOf(p: Picture): PictureView {
   return { status: p.fetch === 'idle' ? 'loading' : p.fetch, url: null, reason: p.reason };
 }
 
+/** Why a picture put on a board was not put there after all: the project was closed meanwhile. */
+const CLOSED = '画像を置く前に案件を閉じました';
+
 const sameView = (a: PictureView, b: PictureView): boolean => a.status === b.status && a.url === b.url && a.reason === b.reason;
 
 /**
@@ -209,6 +212,29 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
     sendTimer = setTimeout(() => void pump(), waitAfter(sendRetries++));
   }
 
+  /**
+   * Keep a picture still to be sent on this device, to be sent after the page is opened again; it is
+   * `unkept`, saying why, until that is done.
+   */
+  async function keepUnsent(p: Picture, out: Outgoing): Promise<void> {
+    if (!device) return;
+    out.keeping = true;
+    notify();
+    try {
+      await device.keep(keyOf(p.name), await bodyOf(p.body!), true);
+      out.unkept = null;
+      // Sent while it was being kept: not to be sent again the next time.
+      if (p.out !== out) void device.sent(keyOf(p.name)).catch(() => {});
+    } catch (e) {
+      out.unkept = deviceFailure(e);
+    }
+    out.keeping = false;
+    if (closed) return;
+    update(p);
+    // Not a change of how it looks (update leaves it unsaid): the project's status changed all the same.
+    notify();
+  }
+
   /** Bring a picture that is not on this page here: from this device, else from the server; fetched again later when it cannot be. */
   async function load(p: Picture): Promise<void> {
     clearTimeout(p.timer);
@@ -270,29 +296,23 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
     /**
      * Keep a picture put on a board here: on this device, then sent to the server. Resolves to the
      * `src` its node holds, once it is kept (or could not be: it is then `unkept`, and still sent).
-     * Rejects, in words for the user, for a kind or size of picture a shared project does not keep.
+     * Rejects, in words for the user, for a kind or size of picture a shared project does not keep,
+     * and once the project is closed: the board on screen is then another one.
      */
     async keep(dataUrl: string): Promise<string> {
       const picture = await assetOf(dataUrl);
       if (!picture) throw new Error('共有中のボードに置ける画像は PNG・JPEG・GIF・WebP・SVG です');
       if (picture.blob.size > MAX_PICTURE_BYTES) throw new Error('共有中のボードに置ける画像は 64MB までです');
+      if (closed) throw new Error(CLOSED);
       const src = sharedSrc(picture.name);
       const p = entry(picture.name);
       if (!p.body) setBody(p, picture.blob);
-      if (p.out || p.onServer || closed) return src;
-      const out: Outgoing = { state: 'unsent', tries: 0, reason: null, unkept: null, keeping: !!device };
+      if (p.out || p.onServer) return src;
+      const out: Outgoing = { state: 'unsent', tries: 0, reason: null, unkept: null, keeping: false };
       p.out = out;
       update(p);
-      try {
-        await device?.keep(keyOf(p.name), await bodyOf(picture.blob), true);
-      } catch (e) {
-        out.unkept = deviceFailure(e);
-      }
-      out.keeping = false;
-      if (closed) return src;
-      update(p);
-      // Not a change of how it looks (update leaves it unsaid): the project's status changed all the same.
-      notify();
+      await keepUnsent(p, out);
+      if (closed) throw new Error(CLOSED);
       void pump();
       return src;
     },
@@ -338,12 +358,13 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
         want(p);
       }
     },
-    /** Send what is still to be sent, and fetch what could not be, now rather than at the next try. */
+    /** Keep on this device, send, and fetch what could not be, now rather than at the next try. */
     retry(): void {
       sendRetries = 0;
       clearTimeout(sendTimer);
       void pump();
       for (const p of pictures.values()) {
+        if (p.out?.unkept && !p.out.keeping) void keepUnsent(p, p.out);
         if (!p.hearers.size || p.fetch === 'denied') continue;
         p.retries = 0;
         want(p);

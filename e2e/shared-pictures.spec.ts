@@ -153,3 +153,20 @@ test('a picture put on the board while the server is down is kept in the browser
   await expect(shown(b)).toHaveCount(1);
   expect(await shownText(b)).toContain('オフライン');
 });
+
+test('a picture laid under the drawing of a shared board is made lighter and brought back up by someone who did not lay it there', async ({ browser }) => {
+  const a = await newBrowser(browser);
+  const b = await newBrowser(browser);
+  await insert(a, svgFile('平面図'));
+  await a.locator('.inspector button', { hasText: '下敷きにする' }).click();
+  /** The picture laid under the drawing, as the board draws it. */
+  const underlay = (page: Page) => page.locator('#canvas g[pointer-events="none"]:has(image[href^="blob:"])');
+  await expect(underlay(b)).toHaveCount(1);
+
+  const row = b.locator('.inspector .underlay');
+  await row.locator('input[type="range"]').press('ArrowLeft');
+  await expect(underlay(a)).toHaveAttribute('opacity', '0.5');
+  await row.getByRole('button', { name: 'やめる' }).click();
+  await expect(underlay(a)).toHaveCount(0);
+  await expect(shown(a)).toHaveCount(1);
+});
