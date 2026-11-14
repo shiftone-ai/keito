@@ -75,8 +75,14 @@ export type EditKind = Tool | 'typing' | 'copying' | 'restack' | 'settings' | 'i
 /** What a shared board does not take yet. A text box is nothing until text is typed into it. */
 const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'text', 'typing', 'settings', 'links', 'tidy', 'comments']);
 
-/** Whether a shared board takes an edit of this kind. */
-export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what);
+/** Whether the app runs in the desktop app, as main.tsx tells. */
+const inDesktopApp = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * Whether a shared board takes an edit of this kind. Not pictures in the desktop app yet (#25): it
+ * reaches the server by WebSocket only, so one put there would never be sent.
+ */
+export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what) && !(what === 'images' && inDesktopApp());
 
 /** What a shared project with no board takes: looking round, nothing to draw on. */
 export const emptyTakes = (what: EditKind): boolean => what === 'select' || what === 'pan';

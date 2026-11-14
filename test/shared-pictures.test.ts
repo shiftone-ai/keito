@@ -6,6 +6,7 @@ import type { ProjectSeed } from '../src/collab/model';
 import { type PictureBody, type PictureDevice, type PictureStatus } from '../src/collab/pictures';
 import { MAX_PICTURE_BYTES, pictureAddress, sharedName } from '../src/collab/pictureRef';
 import type { Role } from '../src/collab/protocol';
+import { NOT_TAKEN } from '../src/collab/scope';
 import { allIds } from '../src/model/ids';
 import { makeImage } from '../src/model/presets';
 import type { Node } from '../src/model/types';
@@ -417,6 +418,14 @@ describe('pictures on a shared board', () => {
     const name = sharedName(srcOf(await a.insert(picture('断られる').dataUrl)))!;
     await until(() => a.watch(name).status() === 'refused', 5_000, 'the picture to be turned away');
     expect(kept()).toEqual([]);
+  });
+
+  it('are not put on a board in the desktop app, which cannot send them yet', async () => {
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    const a = await person('a');
+    expect(a.s().collab?.takes('images')).toBe(false);
+    await expect(a.insert(picture('デスクトップ').dataUrl)).rejects.toThrow(NOT_TAKEN);
+    expect(a.images()).toHaveLength(0);
   });
 
   it("are not taken from a viewer, nor kept inside the board", async () => {
