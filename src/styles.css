@@ -2586,6 +2586,22 @@ button.project-item {
   color: var(--sub);
   font-size: 12.5px;
 }
+.project-item.join {
+  color: var(--sub);
+  font-size: 12.5px;
+}
+
+/* Joining a shared project by its link (see JoinProject). */
+.modal.join-project {
+  width: min(520px, 92vw);
+  height: auto;
+  white-space: normal;
+}
+.join-project-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
 
 /* Search on the board (⌘F): a field over the top of the canvas, the hits listed under it. */
 .search-bar {
