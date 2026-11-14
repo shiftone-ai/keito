@@ -287,9 +287,9 @@ describe('a device placed on boards of a shared project as one shared device', (
     const typing = a.s().typeInto({ id: twin.id, field: 'text' }, false)!;
     expect(typing.value()).toBe(pc.text);
     typing.edit([{ retain: pc.text.length }, { insert: '-1' }]);
-    typing.end(true);
     expect(a.device(twin.id)?.text).toBe(`${pc.text}-1`);
-    await until(() => b.device(pc.id)?.text === `${pc.text}-1`, 5_000, 'the letters to reach the other board');
+    await until(() => b.device(pc.id)?.text === `${pc.text}-1`, 5_000, 'the letters to reach the other board while still typing');
+    typing.end(true);
 
     a.s().undo();
     expect(a.device(twin.id)).toMatchObject({ text: pc.text, shared: b.device(pc.id)?.shared });
