@@ -37,6 +37,11 @@ export function joinInAddress(): SharedJoin | null {
     keepJoin({ project, server, token });
     showSharedAddress(project);
   }
+  return storedJoin(project);
+}
+
+/** What joins a shared project, from the join link last opened for it in this browser; null for none. */
+export function storedJoin(project: string): SharedJoin | null {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(kept(project)) ?? 'null');
     const join = v as Partial<SharedJoin> | null;

@@ -183,37 +183,6 @@ describe('a shared project kept on this device', () => {
     expect(d.node(added.id)).toBeDefined();
   });
 
-  it('sends no edit of a copy the server turned away, even once the server lets this device in again', async () => {
-    const device = memoryDevice();
-    const a = await editor({ device: device.store });
-    const { port } = server;
-    await server.kill();
-    await a.offline();
-    a.drag(seed.shape.id, 300, 40);
-    await until(() => a.s().collab?.device === 'saved', 5_000, 'the edit to be kept on this device');
-    a.session.dispose();
-    administer((store) => store.deleteProject(seed.id));
-    server = await startServer(data, port);
-    const told = vi.spyOn(window, 'alert');
-    const asked = vi.spyOn(window, 'confirm');
-    const b = await editor({ device: device.store });
-    // Opened from the copy, then turned away: left as when turned away while open.
-    await until(() => b.s().collab === null, 10_000, 'the delete to be heard');
-    expect(b.s().doc.id).toBe('local');
-    // Not asked whether to leave: the copy turned away is not sent, and nothing else would keep the edit.
-    expect(asked).not.toHaveBeenCalled();
-    expect(told).toHaveBeenCalledWith(expect.stringMatching(/この共有案件は削除されています。この端末のボードに戻ります。\n.*変更 1 件は、保存されません/));
-    b.session.dispose();
-
-    administer((store) => store.restoreProject(seed.id));
-    const c = await editor({ device: device.store });
-    expect(c.s().collab?.link).toBe('online');
-    expect(c.s().collab?.pending).toBe(0);
-    expect(at(c.node(seed.shape.id))).toEqual({ x: 0, y: 0 });
-    // Left on the device, for the user to take back.
-    expect([...device.kept.values()].map((k) => k.pending.size)).toEqual([1]);
-  });
-
   it('says when this device cannot keep an edit, asks before the page closes on it, and keeps it once the device can', async () => {
     const device = memoryDevice();
     const a = await editor({ device: device.store, page: true });

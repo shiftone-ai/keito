@@ -5,6 +5,7 @@
  */
 import * as Y from 'yjs';
 import { isQuotaError } from '../platform/storage';
+import type { LinkRefusal } from './refusals';
 
 /** A shared project as this device keeps it. */
 export interface KeptProject {
@@ -14,19 +15,22 @@ export interface KeptProject {
   pending: Map<string, Uint8Array>;
   /**
    * Whether the server let this device edit the project (false once it turned it away). Once false,
-   * the copy is left as it is, its unconfirmed edits unsent.
+   * the copy is left as it is, its unconfirmed edits unsent, for the user to take out or let go.
    */
   editable: boolean;
+  /** Why the server turned the device away (see client.ts), while `editable` is false; absent in a copy turned away before it was kept. */
+  refusal?: LinkRefusal;
 }
 
 /**
  * Where this device keeps its copies of shared projects, by key. `change` hands `edit` the copy kept
- * now and writes what it returns, as one write that no other page's change of the same key comes
- * between; it rejects when the write fails (the device full, its storage blocked).
+ * now and writes what it returns (null takes the copy off the device), as one write that no other
+ * page's change of the same key comes between; it rejects when the write fails (the device full, its
+ * storage blocked).
  */
 export interface DeviceStore {
   load(key: string): Promise<KeptProject | null>;
-  change(key: string, edit: (kept: KeptProject | null) => KeptProject): Promise<void>;
+  change(key: string, edit: (kept: KeptProject | null) => KeptProject | null): Promise<void>;
 }
 
 /**
@@ -46,18 +50,19 @@ function reasonOf(e: unknown): string {
 }
 
 /**
- * What is kept once this page's `held` is written over `kept`. Another page of the project on this
- * device may have written its own edits there: they are kept beside this page's, not written over;
- * and a page the server turned away has the copy stay so, whatever a page still open writes after.
+ * What is kept once this page's `held` is written over `kept`; null for nothing. Another page of the
+ * project on this device may have written its own edits there: they are kept beside this page's, not
+ * written over; and a page the server turned away (`refusal`) has the copy stay so, whatever a page
+ * still open writes after, as long as it holds an edit not sent.
  */
-function merged(kept: KeptProject | null, held: Held, editable: boolean, confirmed: Set<string>): KeptProject {
+function merged(kept: KeptProject | null, held: Held, refusal: LinkRefusal | null, confirmed: Set<string>): KeptProject | null {
   const pending = new Map([...(kept?.pending ?? [])].filter(([op]) => !confirmed.has(op)));
   for (const [op, update] of held.pending) pending.set(op, update);
-  return {
-    state: kept ? Y.mergeUpdates([kept.state, held.state]) : held.state,
-    pending,
-    editable: (kept?.editable ?? true) && editable,
-  };
+  const editable = (kept?.editable ?? true) && !refusal;
+  // Not kept turned away with nothing unsent: there is nothing in it to take out, and kept it would keep this device from keeping the project once let in again.
+  if (!editable && !pending.size) return null;
+  const state = kept ? Y.mergeUpdates([kept.state, held.state]) : held.state;
+  return editable ? { state, pending, editable } : { state, pending, editable, refusal: refusal ?? kept?.refusal };
 }
 
 /**
@@ -70,10 +75,10 @@ export function keepCopy(device: DeviceStore | null, key: string, hold: () => He
   let store = device;
   let state: DeviceState = store ? 'saved' : 'none';
   let failure: string | null = null;
-  let writing = false;
+  let writing: Promise<void> | null = null;
   let dirty = false;
-  /** Whether the server lets this page edit the project, as far as this page has heard. */
-  let editable = true;
+  /** Why the server turned this page away; null while it lets this page edit, as far as this page has heard. */
+  let refusal: LinkRefusal | null = null;
   /** Ops confirmed here, to be taken out of the copy by the next write. */
   const confirmed = new Set<string>();
   /** What this page held when it stopped: written in place of what it holds no more. */
@@ -81,19 +86,23 @@ export function keepCopy(device: DeviceStore | null, key: string, hold: () => He
 
   async function write(): Promise<void> {
     if (!store) return;
-    writing = true;
     dirty = false;
     const held = last ?? hold();
     const gone = new Set(confirmed);
+    let kept = true;
     try {
-      await store.change(key, (kept) => merged(kept, held, editable, gone));
+      await store.change(key, (copy) => {
+        const next = merged(copy, held, refusal, gone);
+        kept = !!next;
+        return next;
+      });
       gone.forEach((op) => confirmed.delete(op));
-      if (!dirty) [state, failure] = ['saved', null];
+      if (!kept) [store, state, failure] = [null, 'none', null];
+      else if (!dirty) [state, failure] = ['saved', null];
     } catch (e) {
       [state, failure] = ['failed', reasonOf(e)];
     }
-    writing = false;
-    if (dirty) void write();
+    writing = dirty && store ? write() : null;
     notify();
   }
 
@@ -103,14 +112,15 @@ export function keepCopy(device: DeviceStore | null, key: string, hold: () => He
     if (writing) return;
     // Not said to be saving while failed: it is not kept until a write succeeds.
     if (state !== 'failed') state = 'saving';
-    void write();
+    writing = write();
   }
 
   return {
     /**
-     * The copy kept on the device, to open the project from; null for none, for one that cannot be
-     * read, and for one the server turned away. That one is left as it is, its edits unsent: this page
-     * keeps no copy, and only the server, answering again, says whether this device may edit.
+     * The copy kept on the device, to open the project from; null for none, and for one that cannot
+     * be read. A copy the server turned away comes back as it is (`editable` false), its edits
+     * unsent, for the user to take out or let go (see discard); only the server, answering again,
+     * says whether this device may edit. One turned away with nothing unsent is taken off the device.
      */
     async load(): Promise<KeptProject | null> {
       let kept: KeptProject | null;
@@ -120,18 +130,40 @@ export function keepCopy(device: DeviceStore | null, key: string, hold: () => He
         [state, failure] = ['failed', reasonOf(e)];
         return null;
       }
-      if (kept?.editable) return kept;
-      if (kept) [store, state] = [null, 'none'];
+      if (!kept || kept.editable || kept.pending.size) return kept;
+      // Not left (kept so by an earlier version): it would keep this device from keeping the project once let in (see merged). Not told when it cannot be taken off: the next open tries again.
+      await store?.change(key, (now) => (now && !now.editable && !now.pending.size ? null : now)).catch(() => {});
       return null;
     },
     changed,
     /**
-     * The server turned this page away: the copy is kept as one not to open again (see load), so
-     * that edits the server refused are not taken offline either.
+     * The server turned this page away, for `reason`: the copy is kept as one not to open again as
+     * editable (see load), so that edits the server refused are not taken offline either, nor sent.
      */
-    refused(): void {
-      editable = false;
+    refused(reason: LinkRefusal): void {
+      refusal = reason;
       changed();
+    },
+    /**
+     * Take a copy the server turned away off the device (its edits taken out, or let go), once the
+     * writes under way are done; one let in since, by another page, stays. Nothing is kept after.
+     */
+    async discard(): Promise<void> {
+      // Not stopped before the writes under way are done: the refusal queued behind one would go unwritten, and the copy, left editable, be taken for one let in since.
+      while (writing) await writing;
+      const was = store;
+      [store, state, failure] = [null, 'none', null];
+      await was?.change(key, (kept) => (kept && !kept.editable ? null : kept));
+      notify();
+    },
+    /**
+     * The copy kept on the device once the writes under way are done, with what other pages of the
+     * project on this device kept there beside this page's (see merged); null for none, and for one
+     * that cannot be read.
+     */
+    async settled(): Promise<KeptProject | null> {
+      while (writing) await writing;
+      return (await store?.load(key).catch(() => null)) ?? null;
     },
     /** An op the server confirmed stored: it leaves the copy. */
     confirmed(op: string): void {

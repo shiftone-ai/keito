@@ -1,4 +1,5 @@
 import type { DeviceStore, KeptProject } from '../collab/kept';
+import { refusalOf } from '../collab/refusals';
 
 const DATABASE = 'keito-collab';
 const PROJECTS = 'projects';
@@ -8,7 +9,7 @@ function copyOf(value: unknown): KeptProject | null {
   const v = value as Partial<KeptProject> | undefined;
   if (!(v?.state instanceof Uint8Array) || typeof v.editable !== 'boolean' || !(v.pending instanceof Map)) return null;
   const pending = new Map([...v.pending].filter(([op, update]) => typeof op === 'string' && update instanceof Uint8Array));
-  return { state: v.state, pending, editable: v.editable };
+  return { state: v.state, pending, editable: v.editable, ...(typeof v.refusal === 'string' ? { refusal: refusalOf(v.refusal) } : {}) };
 }
 
 const result = <T>(request: IDBRequest<T>): Promise<T> =>
@@ -64,7 +65,9 @@ function indexedDBDevice(): DeviceStore {
         const get = projects.get(key);
         get.onsuccess = () => {
           try {
-            projects.put(edit(copyOf(get.result)), key);
+            const next = edit(copyOf(get.result));
+            if (next) projects.put(next, key);
+            else projects.delete(key);
           } catch (e) {
             failure = e;
             tx.abort();
