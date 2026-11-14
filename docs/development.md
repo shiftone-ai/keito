@@ -94,7 +94,7 @@ npm run collab -- delete <案件 id>  # 共有案件を削除する（restore <�
 - 写しを置く場所は `DeviceStore`（`src/collab/kept.ts`）で差し替えます。ブラウザの分は `src/platform/indexeddb.ts` です。ほかの置き場所を使うときは、`DeviceStore` を作って `createEditSession({ device })` に渡します。
 - アプリ全体の写しの置き場所は、保存先（`src/platform/storage.ts` の `Backend`）の `device` で決めます。未設定ならブラウザの IndexedDB、`null` なら写しを置きません（デスクトップアプリ）。`createEditSession({ device })` で渡したものが、こちらより優先されます。
 - 共有中のボードは、ボードのフォルダにも手元のボードを置くブラウザの localStorage にも書き込みません。CLI（`npm run keito`）からも読み書きできません。
-- 画面のボードの保存先（手元か共有案件か）は、ボードを開くときに決まります（`src/model/target.ts` の `Target`）。保存先は、編集（`edits`）、保存（`saving`）、タブに並ぶボード（`boards`）、手元のボードだけが持つもの（`local`。版の履歴、案件のほかのボードとの共有、画像）に分かれます。
+- 画面のボードの保存先（手元か共有案件か）は、ボードを開くときに決まります（`src/model/target.ts` の `Target`）。保存先は、編集（`edits`）、保存（`saving`）、タブに並ぶボード（`boards`）、共有案件で機材をほかのボードの機材とつなぐ操作（`devices`）、手元のボードだけが持つもの（`local`。版の履歴、案件のほかのボードとの共有、画像）に分かれます。
 - 手元のボードの編集と元に戻す（⌘Z）は `src/model/edits.ts`、保存は `src/model/saving.ts` が受け持ちます。共有中のボードの分は `src/collab/target.ts` が受け持ちます。共有案件のどのボードを表示するかと、ボードの追加・名前変更・削除・復元は `src/collab/tabs.ts` が受け持ちます。
 - 線の端の機材やポートを誰かが消すと、その線は画面にも表にも書き出しにも出ません（`src/collab/valid.ts`）。線は案件に残るので、消した人が元に戻す（⌘Z）と線も戻ります。
 - アプリと案件でデータの形（`src/collab/model.ts` の `SCHEMA`）が違うときは、案件を開けず、「この版の keito では開けない共有案件です」と出ます。
