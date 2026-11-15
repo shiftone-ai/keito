@@ -2803,6 +2803,10 @@ fieldset.plain {
 fieldset.plain:disabled {
   opacity: 0.6;
 }
+/* A shared board's underlays, set apart from the board settings below them, which it does not take yet */
+fieldset.underlays:not(:empty) {
+  margin-bottom: 18px;
+}
 
 /* Side panels open together: the library and the comments end above the lists */
 .main.with-lists .library {

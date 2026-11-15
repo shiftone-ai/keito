@@ -1,6 +1,6 @@
 import type { Doc, Edge, Node, Port } from '../model/types';
 import { type Run, runsBetween, withRuns } from './order';
-import { ATTRIBUTES, DEVICE_LINKS, LINE_ATTRIBUTES, LINE_TEXTS, PORT_ATTRIBUTES, WRITTEN_ONCE, isShared } from './scope';
+import { ATTRIBUTES, DEVICE_LINKS, LINE_ATTRIBUTES, LINE_TEXTS, PORT_ATTRIBUTES, WRITTEN_ONCE, holdable, isShared } from './scope';
 
 /**
  * Edits of a shared board, read off the drawing the screen shows (within what scope.ts says a shared
@@ -87,7 +87,7 @@ const holdsOnly = (x: object, kept: ReadonlySet<string>): boolean => Object.entr
 
 /** Whether a shared board keeps all that `node` holds. */
 function addable(node: Node): boolean {
-  if (!isShared(node.type)) return false;
+  if (!isShared(node.type) || !holdable(node)) return false;
   return holdsOnly(node, new Set<string>([...NODE_APART, 'x', 'y', 'w', 'h', 'text', ...ATTRIBUTES[node.type], ...(WRITTEN_ONCE[node.type] ?? []), ...(node.type === 'device' ? DEVICE_LINKS : [])]));
 }
 
@@ -116,7 +116,7 @@ function changeOf(from: object, to: object, editable: ReadonlySet<string>, apart
 const RENAMED = new Set<string>([...ATTRIBUTES.device, 'text']);
 
 function nodeChange(from: Node, to: Node): Change | null {
-  if (from.type !== to.type || !isShared(to.type)) return null;
+  if (from.type !== to.type || !isShared(to.type) || !holdable(to)) return null;
   if (from.type === 'device' && to.type === 'device' && to.shared && from.shared === to.shared) return changeOf(from, to, RENAMED, NODE_APART);
   return changeOf(from, to, new Set(ATTRIBUTES[to.type]), to.type === 'legend' ? LEGEND_APART : NODE_APART);
 }

@@ -11,6 +11,8 @@ import { MONO_FONT, UI_FONT, measure, wrapName, wrapText } from '../model/text';
 import { safeUrl } from '../model/url';
 import type { DeviceNode, Doc, Edge, Node, Pt, Rect, SequenceNode } from '../model/types';
 import { assetUrl } from '../platform/storage';
+import { isSharedSrc } from '../collab/pictureRef';
+import { SharedPicture } from './SharedPicture';
 import { linkClick } from '../platform/io';
 
 /** How the board is drawn; the screen and every export share one look. */
@@ -536,7 +538,7 @@ export function NodeView({ n, theme, doc }: { n: Node; theme: Theme; doc?: Doc }
       const caption = captionBox(n);
       return (
         <g opacity={n.under ? (n.opacity ?? 0.55) : undefined} pointerEvents={n.under ? 'none' : undefined}>
-          <image href={assetUrl(doc?.id, n.src)} x={x} y={y} width={w} height={h} preserveAspectRatio="xMidYMid meet" />
+          {isSharedSrc(n.src) ? <SharedPicture n={n} /> : <image href={assetUrl(doc?.id, n.src)} x={x} y={y} width={w} height={h} preserveAspectRatio="xMidYMid meet" />}
           {caption && <TextBlock x={cx} y={caption.y + caption.h / 2} w={w} text={n.caption!} size={n.fontSize ?? CAPTION_SIZE} theme={theme} />}
         </g>
       );

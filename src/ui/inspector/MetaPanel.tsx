@@ -1,13 +1,13 @@
 import { LABEL_SIZE, LABEL_SIZES } from '../../model/labels';
 import { type BoardKind, KINDS, KIND_ORDER, kindOf } from '../../model/kinds';
-import { useStore } from '../../model/store';
+import { useStore, useTakes } from '../../model/store';
 import { shortcuts } from '../../platform/io';
 import { type Doc, type DocMeta, type Node } from '../../model/types';
 import { useShallow } from 'zustand/react/shallow';
 import { useState } from 'react';
 import { composing } from '../keys';
 import { Revisions } from '../Revisions';
-import { useBurst } from '../burst';
+import { useFieldBurst } from '../burst';
 import { Field, Section } from './fields';
 
 /**
@@ -49,10 +49,10 @@ function ProjectField({ value }: { value: string }) {
 }
 
 /** Pictures laid under the drawing (floor plans): they cannot be clicked, so they are managed here. */
-function Underlays() {
+export function Underlays() {
   const list = useStore(useShallow((s) => s.doc.nodes.filter((n): n is Extract<Node, { type: 'image' }> => n.type === 'image' && !!n.under)));
   const patch = (id: string, p: Partial<Node>, record = false) => useStore.getState().updateNode(id, p, record);
-  const burst = useBurst();
+  const step = useFieldBurst();
   if (!list.length) return null;
   return (
     <>
@@ -60,10 +60,11 @@ function Underlays() {
       {list.map((n) => (
         <div key={n.id} className="underlay">
           <span>{n.text || n.id}</span>
+          {/* One step for each drag or key pressed, ended there: a shared board sends it then. */}
           <input type="range" min={0.1} max={1} step={0.05} value={n.opacity ?? 0.55} onChange={(e) => {
-              burst();
+              step.change();
               patch(n.id, { opacity: Number(e.target.value) });
-            }} title="濃さ" />
+            }} onPointerUp={step.end} onKeyUp={step.end} onBlur={step.end} title="濃さ" />
           <button
             className="mini"
             onClick={() => {
@@ -91,6 +92,7 @@ export function MetaPanel() {
   const protocolLabels = useStore((s) => s.doc.protocolLabels !== false);
   const hops = useStore((s) => s.doc.hops === true);
   const labelSize = useStore((s) => s.doc.labelSize ?? LABEL_SIZE);
+  const takes = useTakes();
   // A board-wide choice applies to every line: per-line exceptions for it are cleared.
   const boardLabel = (change: Partial<Doc>, clear: 'showLength' | 'stacked' | 'showProtocol') =>
     useStore.getState().mutate((d) => ({ ...d, ...change, edges: d.edges.map((x) => (x[clear] === undefined ? x : { ...x, [clear]: undefined })) }));
@@ -170,7 +172,8 @@ export function MetaPanel() {
         </label>
         <p className="hint">線ごとに変えたいときは、その線を選んで右パネルで設定できます（ここで変えると、線ごとの設定は解除されます）。</p>
       </Section>
-      <Underlays />
+      {/* A board that does not take its settings shows them apart (see Inspector). */}
+      {takes('settings') && <Underlays />}
       </fieldset>
       {/* Its own per board: a name half typed for one board's state never lands on another's. */}
       <Revisions key={boardId} />

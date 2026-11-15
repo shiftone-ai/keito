@@ -13,7 +13,7 @@
  *   restore <案件 id>                            bring a deleted project back as it was
  *
  * Every command takes --data <folder> (default: $KEITO_COLLAB_DATA, else ./collab-data), the
- * folder holding the SQLite file. Whoever can open that folder administers every project in it:
+ * folder holding the SQLite file and the projects' pictures (pictures/). Whoever can open that folder administers every project in it:
  * nobody else may (see docs/development.md), and no command runs while anyone else can.
  */
 import { mkdirSync, statSync } from 'node:fs';
@@ -22,6 +22,7 @@ import { parseArgs } from 'node:util';
 import { sharedAddress } from '../../src/collab/join';
 import { type Role, isRole } from '../../src/collab/protocol';
 import { type BoardKind, KIND_ORDER } from '../../src/model/kinds';
+import { pictureStore } from './pictureStore';
 import { collabServer } from './server';
 import { openStore } from './store';
 
@@ -63,7 +64,7 @@ if (command === 'serve') {
   const port = Number(given);
   if (!/^\d+$/.test(given) || port > 65535) fail(`ポート番号が正しくありません: ${given}`);
   const host = values.host ?? process.env.KEITO_COLLAB_HOST;
-  const server = collabServer(store, { port, address: host });
+  const server = collabServer(store, { port, address: host, pictures: pictureStore(join(folder, 'pictures')) });
   await server.listen();
   // One line, read by whoever started the server (the tests read the port from it).
   console.log(`keito collab listening on ws://${host ?? '0.0.0.0'}:${server.address.port}`);

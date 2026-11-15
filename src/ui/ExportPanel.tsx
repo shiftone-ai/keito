@@ -12,6 +12,7 @@ import type { Doc } from '../model/types';
 import { labelOf } from '../model/history';
 import { useProjectTabs } from './BoardTabs';
 import { inlineImages, safeName } from '../platform/storage';
+import { isSharedSrc } from '../collab/pictureRef';
 import { copyPng, getSetting, pickFile, printPage, saveFile, setSetting } from '../platform/io';
 
 /** Save a file; what to say when the user called the save off (nothing when it was saved). */
@@ -51,6 +52,8 @@ export function ExportPanel() {
   const picturesReady = inlined?.from === board || !board.nodes.some((n) => n.type === 'image' && n.src.startsWith('asset:'));
   // Pictures that could not be read from the board's folder (a file gone missing).
   const missing = picturesReady ? whole.nodes.filter((n) => n.type === 'image' && n.src.startsWith('asset:')).length : 0;
+  // Pictures of a shared project: drawn as their placeholders, the export not reading them yet.
+  const shared = whole.nodes.filter((n) => n.type === 'image' && isSharedSrc(n.src)).length;
   // The whole project at once: every board of it, in the order of its tabs.
   const tabs = useProjectTabs();
   const others = useStore((s) => s.others);
@@ -388,6 +391,7 @@ export function ExportPanel() {
                 {pngScale(image, scale) < scale && <p className="hint">図が大きいため、{Math.floor(pngScale(image, scale) * 10) / 10}x で書き出します（ブラウザで作れる画像の大きさの上限）。</p>}
                 {!picturesReady && <p className="hint">画像を読み込み中…</p>}
                 {missing > 0 && <p className="error">画像 {missing} 枚がボードのフォルダから読めず、書き出しに入りません。</p>}
+                {shared > 0 && <p className="error">共有中の案件の画像 {shared} 枚は、まだ書き出しに入りません。</p>}
                 <button className="wide" disabled={!picturesReady} onClick={run(async () => download(`${name}.png`, await toPng(image, scale)), 'PNG を保存しました。')}>PNG を保存</button>
                 <button className="wide" disabled={!picturesReady} onClick={run(() => copyPng(toPng(image, scale)), 'クリップボードにコピーしました。スライドにそのまま貼れます。')}>PNG をコピー</button>
                 <button className="wide" disabled={!picturesReady} onClick={run(() => download(`${name}.svg`, image.svg, 'image/svg+xml'), 'SVG を保存しました。')}>SVG を保存</button>

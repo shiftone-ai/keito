@@ -203,8 +203,7 @@ test('each browser undoes only its own edits of a shared board', async ({ browse
 
 test('a shared board turns away what it does not take yet, and a board of this machine still saves to its folder', async ({ browser }) => {
   const a = await openLink(browser);
-  for (const tool of ['四角', 'テキスト']) await expect(a.locator(`.toolbar button[aria-label="${tool}"]`)).toHaveCount(1);
-  await expect(a.locator('.toolbar button[aria-label="画像・SVG を埋め込む"]')).toHaveCount(0);
+  for (const tool of ['四角', 'テキスト', '画像・SVG を埋め込む']) await expect(a.locator(`.toolbar button[aria-label="${tool}"]`)).toHaveCount(1);
   // Text copied in another app is pasted as a text box.
   await a.evaluate(() => {
     const data = new DataTransfer();
