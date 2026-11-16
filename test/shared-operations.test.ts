@@ -132,7 +132,7 @@ describe('operations of several steps on a shared board', () => {
     expect(c.s().doc.edges).toEqual(b.s().doc.edges);
   });
 
-  it('pastes a device copied from a board of this machine without its links to other boards, which a shared board does not hold yet', async () => {
+  it('pastes a device copied from a board of this machine without naming devices the shared project does not have', async () => {
     const linked: DeviceNode = { ...makeDevice(presetOf('pc')!, 0, 0, new Set()), shared: 'pc-key', sharedAt: 1, runsOn: 'host-key' };
     const a = await editor([linked], (session) => {
       session.useStore.getState().select([linked.id]);

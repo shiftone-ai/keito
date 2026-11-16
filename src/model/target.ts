@@ -21,6 +21,12 @@ export interface Target {
   /** What only this machine's store keeps of the board; null where the board is kept elsewhere. */
   local: LocalStore | null;
   /**
+   * Devices being one with devices of the project's other boards, where the project keeps each such
+   * device once (a shared project's, see collab/devices.ts); null where the boards keep copies alike
+   * (this machine's store, see model/shared.ts).
+   */
+  devices: DeviceLinks | null;
+  /**
    * Keep a picture for the board; resolves to the `src` an image node should hold. Rejects, in words
    * for the user, where the board takes no picture.
    */
@@ -81,6 +87,24 @@ export interface TextSession {
   redo(): void;
   /** Stop typing. What was typed stays one step to undo, or (`keep` false) is called off with what joined it, leaving nothing to redo; others' typing stays. */
   end(keep: boolean): void;
+}
+
+/** A device of a board of the project: on which board, as which node. */
+export interface DeviceAt {
+  board: string;
+  node: string;
+}
+
+/** Making devices of the board one with devices of the project's other boards, each a step of its own to undo. */
+export interface DeviceLinks {
+  /** A device of the board becomes one with a device of another board, whose name and particulars it shows. */
+  link(node: string, to: DeviceAt): void;
+  /** A device of the board stops being one with the others, keeping what it shows as its own; they stay as they are. */
+  unlink(node: string): void;
+  /** Software runs on a device of another board, taking its host name and IP; or on none, keeping those it shows. */
+  runOn(node: string, host: DeviceAt | null): void;
+  /** Delete the shared device a device of the board is one with, from every board, once the user agrees to what goes with it. */
+  remove(node: string): Promise<void>;
 }
 
 /** Keeping the board's edits, and what leaving the board or closing the page waits for. */

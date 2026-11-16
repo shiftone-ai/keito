@@ -2,6 +2,8 @@ import * as Y from 'yjs';
 import type { TextDelta } from '../model/delta';
 import type { TextAt, TextSession } from '../model/target';
 import { boardLines, boardNodes, liveBoard } from './boards';
+import { placedFrom } from './devices';
+import type { YMap } from './entries';
 
 /** How a text is typed into: under what origin, and as part of which history. */
 export interface TypingContext {
@@ -102,7 +104,9 @@ function boardText(ydoc: Y.Doc, board: string, at: TextAt): Y.Text | null {
   for (const part of [boardNodes(ydoc, board), boardLines(ydoc, board)]) {
     const item = part?.get(at.id);
     if (!(item instanceof Y.Map)) continue;
-    const text = item.get(at.field);
+    // Not the node's: a device placed from a shared device shows the shared device's name (see devices.ts).
+    const shared = at.field === 'text' ? placedFrom(item as YMap) : null;
+    const text = (shared ?? item).get(at.field);
     return text instanceof Y.Text ? text : null;
   }
   return null;
