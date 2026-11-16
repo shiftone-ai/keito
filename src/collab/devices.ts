@@ -9,12 +9,13 @@ import { type YMap, isString, setEach, textOf } from './entries';
 /**
  * The project's shared devices (see model.ts for the rest of the Y.Doc):
  *
- * devices: Y.Map<key, Y.Map { text: Y.Text, maker, model, category, url, ip, host }>
+ * devices: Y.Map<key, Y.Map { text: Y.Text, maker, model, category, url, ip, host, runsOn }>
  *
  * A device on several boards of the project is one shared device. Its name and the particulars of
  * SHARED are kept here once; each device placed on a board from it names it under `shared` and keeps
  * the rest as its own (where it is, its ports, note, colour …). Software names the shared device it
- * runs on under `runsOn`, and takes its host name and IP from it as it is now. A device placed from a
+ * runs on under `runsOn` (shared software, in the shared device it is placed from), and takes its
+ * host name and IP from it as it is now. A device placed from a
  * shared device the project no longer has is left out of the drawing, as a line whose end is gone is
  * (see valid.ts); software running on one has no host, never another device's.
  */
@@ -84,7 +85,7 @@ export function readLinks(node: YMap): Partial<DeviceNode> | null {
     if (!record) return null;
     Object.assign(out, particularsOf(record), { shared });
   }
-  const runsOn = node.get('runsOn');
+  const runsOn = (sharedOf(devices, shared) ?? node).get('runsOn');
   if (isString(runsOn)) Object.assign(out, hostOf(sharedOf(devices, runsOn)), { runsOn });
   return out;
 }
@@ -131,18 +132,19 @@ function deviceIn(nodes: YMap | null, id: string): YMap | null {
   return isString(node.get('shared')) && !placedFrom(node as YMap) ? null : (node as YMap);
 }
 
-/** A device placed from a shared device: it names it, and keeps none of its particulars as its own. */
+/** A device placed from a shared device: it names it, and keeps none of its particulars, nor a device it runs on, as its own. */
 function placeFrom(node: YMap, key: string): void {
   node.set('shared', key);
   node.delete('text');
   for (const k of SHARED) node.delete(k);
+  node.delete('runsOn');
 }
 
-/** Software running on a shared device: it names it, and keeps no host name or IP of its own. */
-function runOn(node: YMap, key: string): void {
-  node.set('runsOn', key);
-  node.delete('host');
-  node.delete('ip');
+/** Software (or the shared software it is placed from) running on a shared device: it names it, and keeps no host name or IP of its own. */
+function runOn(software: YMap, key: string): void {
+  software.set('runsOn', key);
+  software.delete('host');
+  software.delete('ip');
 }
 
 /**
@@ -164,7 +166,7 @@ export function shareKey(ydoc: Y.Doc, at: DeviceAt): string | null {
   const record = new Y.Map<unknown>();
   devices.set(key, record);
   record.set('text', new Y.Text(textOf(node.get('text'))));
-  for (const k of SHARED) {
+  for (const k of [...SHARED, 'runsOn']) {
     const v = node.get(k);
     if (isString(v)) record.set(k, v);
   }
@@ -176,8 +178,8 @@ export function shareKey(ydoc: Y.Doc, at: DeviceAt): string | null {
  * Linked to a device of another board (or running on one), both are placed from the shared device
  * under `key` (see shareKey), whose particulars they then show. Unlinked, the device keeps what it
  * showed of the shared device as its own; neither the other devices placed from it nor any other
- * shared device change. Software stopped running on a device keeps the host name and IP it showed,
- * in the shared software it is placed from if any. A link of a device no longer there, or to one,
+ * shared device change. Software placed from shared software runs on a device as the shared software
+ * does, all its placements alike; stopped running on one, it keeps the host name and IP it showed. A link of a device no longer there, or to one,
  * is dropped. Deleting a shared device leaves out of the drawing every device placed from it, with
  * the lines to them (see readLinks).
  */
@@ -191,28 +193,31 @@ export function writeLink(ydoc: Y.Doc, nodes: YMap, link: DeviceLink, key: strin
     const other = deviceIn(boardNodes(ydoc, there.board), there.node);
     if (!other || !key || !sharedOf(devices, key)) return;
     if (other.get('shared') !== key) placeFrom(other, key);
-    (link.type === 'link' ? placeFrom : runOn)(node, key);
+    if (link.type === 'link') placeFrom(node, key);
+    else runOn(placedFrom(node) ?? node, key);
   } else if (link.type === 'unlink') {
     const record = placedFrom(node);
     if (!record) return;
     const { text, ...particulars } = particularsOf(record);
     node.set('text', new Y.Text(text));
-    setEach(node, particulars);
+    setEach(node, { ...particulars, runsOn: record.get('runsOn') });
     node.delete('shared');
-  } else if (isString(node.get('runsOn'))) {
-    // Not on the node alone: placed from shared software, the node shows the shared software's.
-    setEach(placedFrom(node) ?? node, hostOf(sharedOf(devices, node.get('runsOn'))));
-    node.delete('runsOn');
+  } else {
+    const software = placedFrom(node) ?? node;
+    const host = software.get('runsOn');
+    if (!isString(host)) return;
+    setEach(software, hostOf(sharedOf(devices, host)));
+    software.delete('runsOn');
   }
 }
 
 /**
  * A device just put on a board (from a copy, say) that names shared devices: placed from the one it
- * names and running on the other only where the project has them. One it does not have (copied from
- * a board of this machine, or deleted meanwhile) is not named: what the device shows is its own.
+ * names, else running on the other, only where the project has them. One it does not have (copied
+ * from a board of this machine, or deleted meanwhile) is not named: what the device shows is its own.
  */
 export function putLinks(node: YMap, n: DeviceNode): void {
   const devices = devicesOf(node);
   if (n.shared && sharedOf(devices, n.shared)) placeFrom(node, n.shared);
-  if (n.runsOn && sharedOf(devices, n.runsOn)) runOn(node, n.runsOn);
+  else if (n.runsOn && sharedOf(devices, n.runsOn)) runOn(node, n.runsOn);
 }

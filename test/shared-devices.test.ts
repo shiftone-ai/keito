@@ -336,6 +336,24 @@ describe('a device placed on boards of a shared project as one shared device', (
     }
   });
 
+  it('links software running on a device from another software board: both show the host name and IP of that device, as it has them now', async () => {
+    const a = await editor();
+    const pc = a.add('pc', 300, 0);
+    a.s().updateNode(pc.id, { ip: '192.168.0.10' });
+    const soft = a.addBoard('ソフト', 'software');
+    const td = a.add('td');
+    a.s().runOn(td.id, a.entry(seed.board.id, pc.id));
+    const soft2 = a.addBoard('ソフト2', 'software');
+    const td2 = a.add('td');
+    a.s().linkTo(td2.id, a.entry(soft, td.id));
+    expect(a.device(td2.id)).toMatchObject({ host: pc.text, ip: '192.168.0.10' });
+
+    a.s().openBoard(seed.board.id);
+    a.s().updateNode(pc.id, { ip: '192.168.0.11' });
+    expect(a.device(td.id, soft)).toMatchObject({ host: pc.text, ip: '192.168.0.11' });
+    expect(a.device(td2.id, soft2)).toMatchObject({ host: pc.text, ip: '192.168.0.11' });
+  });
+
   it('keeps the host name and IP software placed on two software boards showed, once it runs on no device', async () => {
     const a = await editor();
     const pc = a.add('pc', 300, 0);
