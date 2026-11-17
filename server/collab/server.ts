@@ -5,6 +5,7 @@ import { type Answer, type LetGo, type Role, readCommit, readCredential, writeAc
 import { type Denial, authenticate, authorize } from './access';
 import { pictureRoutes } from './pictureRoutes';
 import type { PictureStore } from './pictureStore';
+import { pictureSweep } from './pictureSweep';
 import type { CollabStore } from './store';
 
 /**
@@ -60,10 +61,13 @@ function watchAccess(hocuspocus: Hocuspocus, store: CollabStore): () => void {
  * the project only as commits of an editor (see src/collab/protocol.ts), answered once stored. A
  * client whose invite is revoked, or whose project is deleted, while connected is let go (see
  * watchAccess). The projects' pictures are sent and fetched over HTTP on the same port (see
- * pictureRoutes.ts), kept in `pictures`; the clients of a project are told of each new one.
+ * pictureRoutes.ts), kept in `pictures`; the clients of a project are told of each new one. A picture
+ * no board has used for `keepUnusedMs` is taken off (see pictureSweep.ts).
  */
-export function collabServer(store: CollabStore, options: { port: number; address?: string; pictures: PictureStore }): Server {
+export function collabServer(store: CollabStore, options: { port: number; address?: string; pictures: PictureStore; keepUnusedMs: number }): Server {
   let unwatch = (): void => {};
+  let unsweep = (): void => {};
+  const sweep = pictureSweep(store, options.pictures, options.keepUnusedMs);
   const answerPictures = pictureRoutes(store, options.pictures, (project, name) => server.hocuspocus.documents.get(project)?.broadcastStateless(writeArrival(name)));
   const server: Server = new Server({
     port: options.port,
@@ -139,6 +143,7 @@ export function collabServer(store: CollabStore, options: { port: number; addres
 
     async onListen() {
       unwatch = watchAccess(server.hocuspocus, store);
+      unsweep = sweep.start();
     },
 
     async onRequest({ request, response }) {
@@ -148,6 +153,7 @@ export function collabServer(store: CollabStore, options: { port: number; addres
 
     async onDestroy() {
       unwatch();
+      unsweep();
     },
   });
   return server;

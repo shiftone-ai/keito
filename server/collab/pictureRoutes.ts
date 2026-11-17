@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MAX_PICTURE_BYTES, hashOf, pictureOfPath, typeOf } from '../../src/collab/pictureRef';
 import { type Denial, type Need, authenticate, authorize } from './access';
-import type { PictureStore } from './pictureStore';
+import type { NoRoom, PictureStore } from './pictureStore';
 import type { CollabStore } from './store';
 
 /** What a project id must look like to be made a folder of (the ids `initProject` gives are UUIDs). */
 const PROJECT = /^[A-Za-z0-9_-]{1,80}$/;
 
 /** Why a request is answered with an error, as its JSON body says. */
-type Failure = 'malformed' | 'mismatch' | 'too-large' | 'missing' | 'method' | 'failed';
+type Failure = 'malformed' | 'mismatch' | 'too-large' | NoRoom | 'missing' | 'method' | 'failed';
 
 // Any page may ask: an invite's secret, not the page's origin, is what lets a request in.
 const CORS = { 'Access-Control-Allow-Origin': '*' };
@@ -41,8 +41,9 @@ async function bodyOf(request: IncomingMessage, limit: number): Promise<Uint8Arr
  * invite that may see the project, to fetch a picture of it, or change it, to send one. A picture is
  * looked for in the project asked for only, so the name of another project's picture, or a guessed
  * one, finds nothing without an invite to that project. Sent bytes are kept only under the name they
- * hash to. `arrived` is told of each picture newly kept. Resolves to whether the request was one for
- * a picture (and so answered).
+ * hash to, and only while there is room for them (see pictureStore.ts): a picture there is none for
+ * is answered 507 with why. `arrived` is told of each picture newly kept. Resolves to whether the
+ * request was one for a picture (and so answered).
  */
 export function pictureRoutes(store: CollabStore, pictures: PictureStore, arrived: (project: string, name: string) => void) {
   /** The invite that may do `need` with `project`, or the denial answered. */
@@ -64,7 +65,12 @@ export function pictureRoutes(store: CollabStore, pictures: PictureStore, arrive
     if (createHash('sha256').update(bytes).digest('hex').slice(0, 24) !== hashOf(name)) return answer(response, 400, 'mismatch');
     // Checked again once the bytes are in: an invite revoked while they came keeps nothing.
     if (!admit(request, response, project, name, 'edit')) return;
-    if ((await pictures.put(project, name, bytes)) === 'stored') arrived(project, name);
+    const outcome = await pictures.put(project, name, bytes);
+    if (outcome !== 'stored' && outcome !== 'known') {
+      console.warn(`[keito-collab] ${project}: picture ${name} refused (${outcome})`);
+      return answer(response, 507, outcome);
+    }
+    if (outcome === 'stored') arrived(project, name);
     answer(response, 204);
   }
 

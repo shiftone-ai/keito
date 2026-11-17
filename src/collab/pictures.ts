@@ -33,10 +33,10 @@ export interface PictureDevice {
  * How a picture of the project stands on this page. Put on the board here, and not on the server yet:
  * `unsent` (waiting to be sent: offline …), `sending`, `resending` (a try after one that failed),
  * `failed` (the server did not keep it: sent again later), `unkept` (this device could not keep it
- * either: it is on this page alone), `refused` (the server turned it away: not sent again). Not on
- * this page: `loading`, `waiting` (the server does not have it yet), `unreachable` (it could not be
- * fetched: fetched again later), `denied` (the server turned the fetch away). `shown`: on this page
- * and on the server.
+ * either: it is on this page alone), `refused` (the server turned it away, saying why: sent again
+ * only when the user asks, see retry). Not on this page: `loading`, `waiting` (the server does not
+ * have it yet), `unreachable` (it could not be fetched: fetched again later), `denied` (the server
+ * turned the fetch away). `shown`: on this page and on the server.
  */
 export type PictureStatus = 'shown' | 'unsent' | 'sending' | 'resending' | 'failed' | 'unkept' | 'refused' | 'loading' | 'waiting' | 'unreachable' | 'denied';
 
@@ -71,6 +71,8 @@ const DENIALS: Record<string, string> = {
   revoked: '招待が取り消されました',
   deleted: '案件が削除されています',
   'too-large': '画像が 64MB を超えています',
+  'project-full': '案件の画像の容量が足りません',
+  'disk-full': '共同編集先の空き容量が足りません',
 };
 
 async function denialOf(res: Response): Promise<string> {
@@ -101,8 +103,6 @@ interface Picture {
   body: Blob | null;
   url: string | null;
   out: Outgoing | null;
-  /** Whether the server is known to have it (it was sent or fetched here). */
-  onServer: boolean;
   /** How fetching it went, while it is not on this page. */
   fetch: 'idle' | 'loading' | 'waiting' | 'unreachable' | 'denied';
   reason: string | null;
@@ -149,7 +149,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
   function entry(name: string): Picture {
     let p = pictures.get(name);
     if (!p) {
-      p = { name, body: null, url: null, out: null, onServer: false, fetch: 'idle', reason: null, view: LOADING, hearers: new Set(), retries: 0 };
+      p = { name, body: null, url: null, out: null, fetch: 'idle', reason: null, view: LOADING, hearers: new Set(), retries: 0 };
       pictures.set(name, p);
     }
     return p;
@@ -186,12 +186,11 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       const res = await fetch(address(p.name), { method: 'PUT', headers: { ...authorization, 'Content-Type': p.body!.type }, body: p.body });
       if (res.ok) {
         p.out = null;
-        p.onServer = true;
         notify();
         // Failing, it is sent again the next time the project is opened here: the server keeps it once.
         void device?.sent(keyOf(p.name)).catch(() => {});
         goOn = true;
-      } else if (res.status === 403 || res.status === 413) {
+      } else if (res.status === 403 || res.status === 413 || res.status === 507) {
         [out.state, out.reason] = ['denied', await denialOf(res)];
         goOn = true;
       } else {
@@ -248,7 +247,6 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       if (res.ok) {
         const body = await res.blob();
         if (closed || p.body) return;
-        p.onServer = true;
         setBody(p, body);
         // Not kept, it is fetched again the next time it is shown offline.
         void bodyOf(body).then((b) => device?.keep(keyOf(p.name), b, false)).catch(() => {});
@@ -294,10 +292,12 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
 
   return {
     /**
-     * Keep a picture put on a board here: on this device, then sent to the server. Resolves to the
-     * `src` its node holds, once it is kept (or could not be: it is then `unkept`, and still sent).
-     * Rejects, in words for the user, for a kind or size of picture a shared project does not keep,
-     * and once the project is closed: the board on screen is then another one.
+     * Keep a picture put on a board here: on this device, then sent to the server, each time it is
+     * put there (the server keeps a picture no board uses only for a time: it may no longer have one
+     * sent or fetched here before). Resolves to the `src` its node holds, once it is kept (or could
+     * not be: it is then `unkept`, and still sent). Rejects, in words for the user, for a kind or
+     * size of picture a shared project does not keep, and once the project is closed: the board on
+     * screen is then another one.
      */
     async keep(dataUrl: string): Promise<string> {
       const picture = await assetOf(dataUrl);
@@ -307,7 +307,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       const src = sharedSrc(picture.name);
       const p = entry(picture.name);
       if (!p.body) setBody(p, picture.blob);
-      if (p.out || p.onServer) return src;
+      if (p.out) return src;
       const out: Outgoing = { state: 'unsent', tries: 0, reason: null, unkept: null, keeping: false };
       p.out = out;
       update(p);
@@ -358,10 +358,18 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
         want(p);
       }
     },
-    /** Keep on this device, send, and fetch what could not be, now rather than at the next try. */
+    /**
+     * Keep on this device, send, and fetch what could not be, now rather than at the next try. What
+     * the server turned away is sent once more too: it may have room for it by now.
+     */
     retry(): void {
       sendRetries = 0;
       clearTimeout(sendTimer);
+      for (const p of pictures.values()) {
+        if (p.out?.state !== 'denied') continue;
+        p.out.state = 'unsent';
+        update(p);
+      }
       void pump();
       for (const p of pictures.values()) {
         if (p.out?.unkept && !p.out.keeping) void keepUnsent(p, p.out);
