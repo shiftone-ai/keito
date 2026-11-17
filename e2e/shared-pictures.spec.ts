@@ -194,10 +194,9 @@ test('a picture the server has no room for says so on the board that sent it, an
   await insert(a, first);
   await expect(shown(b)).toHaveCount(1);
   await insert(a, second);
-  await expect(badge(a)).toHaveText('共有できない画像です');
-  await expect(a.locator('#canvas .picture-badge title')).toHaveText('案件の画像の容量が足りません');
+  await expect(badge(a)).toHaveText('案件の画像の容量が足りません');
   await expect(a.locator('.save-state')).toHaveText(/共同編集先に保存できていません/);
-  await expect(a.locator('.save-state')).toHaveAttribute('title', /案件の画像の容量が足りません/);
+  await expect(a.locator('.save-state')).toHaveAttribute('title', /案件の画像の容量が足りません）\n自動ではやり直しません。「もう一度」/);
   await expect(placeholder(b)).toHaveText('画像の到着待ち');
 
   // Taken off the board by whoever put it there, the picture that was turned away goes for everyone.

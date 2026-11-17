@@ -53,6 +53,8 @@ interface PicturesStatus {
   unsent: number;
   /** Why one is failing to be sent: the last try that failed, until one goes through. */
   failure: string | null;
+  /** Whether that one was turned away by the server: it is sent again when asked (see retry), not by itself. */
+  turnedAway: boolean;
   /** Why this device could not keep one still to be sent. */
   unkept: string | null;
   /** Whether one still to be sent is being written to this device. */
@@ -346,6 +348,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       return {
         unsent: out.length,
         failure: failing ? `画像を共同編集先に保存できていません（${failing.reason}）` : null,
+        turnedAway: failing?.state === 'denied',
         unkept: unkept ? `画像を端末に保存できません（${unkept.unkept}）` : null,
         keeping: out.some((o) => o.keeping),
       };
