@@ -20,6 +20,7 @@ import { RevisionBanner } from './ui/Revisions';
 import { TOOL_KEYS, Toolbar } from './ui/Toolbar';
 import { TopBar } from './ui/TopBar';
 import { kindOf } from './model/kinds';
+import { lookingOnly } from './collab/role';
 import { isUnderlay } from './model/geometry';
 import { SettingsPanel } from './ui/Settings';
 
@@ -104,6 +105,8 @@ function useHotkeys() {
       // a name typed in romaji ("sousinki", "tenji" …) would otherwise switch tools on its first letter.
       const typeToEdit = () => flushSync(() => s.setEditing(only));
       const typing = editable && !mod && !e.altKey && (ime ? e.code !== 'Space' : e.key.length === 1 && e.key !== ' ');
+      // Not `docks.library` alone: left open, the library is out of sight on a board that offers none (its kind has none, or the board is only looked at), where Escape would seem to do nothing and L to open nothing.
+      const libraryOffered = !!kindOf(s.doc).library && !lookingOnly(s);
       let handled = true;
       if (mod && key === 'z') e.shiftKey ? s.redo() : s.undo();
       else if (mod && key === 'y') s.redo();
@@ -132,7 +135,7 @@ function useHotkeys() {
         if (s.placing) s.setPlacing(null);
         else if (s.tool !== 'select') s.setTool('select');
         else if (s.selection.length) s.select([]);
-        else if (s.docks.library) s.setDock('library', false);
+        else if (s.docks.library && libraryOffered) s.setDock('library', false);
         else if (s.docks.comments) s.setDock('comments', false);
         else if (s.docks.lists) s.setDock('lists', false);
       } else if (key === 'enter' && editable) s.setEditing(only);
@@ -149,7 +152,7 @@ function useHotkeys() {
       } else if (e.shiftKey && e.code === 'Digit1') s.fit();
       else if (typing) return typeToEdit();
       // The library and the tools a board's kind offers; keys for others do nothing on it.
-      else if (key === 'l' && kindOf(s.doc).library) s.setDock('library');
+      else if (key === 'l' && libraryOffered) s.setDock('library');
       else if (TOOL_KEYS[key] && !e.shiftKey && !e.altKey && kindOf(s.doc).tools.includes(TOOL_KEYS[key])) s.setTool(TOOL_KEYS[key]);
       else handled = false;
       if (handled) e.preventDefault();
