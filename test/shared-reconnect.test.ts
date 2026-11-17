@@ -121,6 +121,34 @@ function typeAtEnd(e: Awaited<ReturnType<typeof editor>>): void {
 }
 
 describe('text typed while offline', { timeout: 30_000 }, () => {
+  it('is one unsent change however many letters it is, with the box growing for them and an undo as it is typed, each edit after it another, and the same once the page is opened again', async () => {
+    const device = memoryDevice();
+    const a = await editor({ device: device.store });
+    await server.kill();
+    await a.offline();
+    const typing = a.s().typeInto({ id: seed.shape.id, field: 'text' }, false)!;
+    for (const letter of 'offline-memo') typing.edit([{ retain: typing.value().length }, { insert: letter }]);
+    // The box made taller for what was typed, as the board's editor does.
+    a.s().updateNode(seed.shape.id, { h: 120 }, false);
+    typing.undo();
+    typing.redo();
+    expect(a.s().collab?.pending).toBe(1);
+    typing.end(true);
+    expect(a.node(seed.shape.id)).toMatchObject({ h: 120, text: '図形offline-memo' });
+    expect(a.s().collab?.pending).toBe(1);
+    // Resized with the typing done: no longer part of it.
+    a.s().updateNode(seed.shape.id, { h: 130 }, false);
+    expect(a.s().collab?.pending).toBe(2);
+    a.drag(seed.shape.id, 300, 40);
+    expect(a.s().collab?.pending).toBe(3);
+    await a.kept();
+    a.session.dispose();
+
+    const b = await editor({ device: device.store });
+    expect(b.node(seed.shape.id)).toMatchObject({ x: 300, y: 40, h: 130, text: '図形offline-memo' });
+    expect(b.s().collab?.pending).toBe(3);
+  });
+
   it('is stored with the other edits once the server is back', async () => {
     const a = await editor({ device: memoryDevice().store });
     const { port } = server;
