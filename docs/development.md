@@ -15,6 +15,7 @@ npm run app:release  # 署名・公証済みの .dmg を作る（人に配ると
 npm run app:release:windows  # Windows 版のインストーラーを Mac でクロスビルドする（下の「Windows 版」）
 npm run collab -- serve  # 共同編集サーバーを起動（下の「共有案件（試験中）」）
 npx playwright test      # 2 つのブラウザで共有案件を確かめる E2E（初回は npx playwright install chromium）
+KEITO_E2E_PORT=5491 npx playwright test  # ほかの E2E と同時に実行するときはポートを変える（既定は 5199）
 ```
 
 ## 構成
