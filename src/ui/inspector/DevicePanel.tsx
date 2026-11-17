@@ -72,7 +72,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
     <>
       <Head title={soft ? '部品' : '機材'} id={n.id} />
       <Section title="基本情報">
-        <Field freeText wrap label="名称（改行できます）" value={n.text} onChange={(v) => patch({ text: v })} />
+        <Field at={{ id: n.id, field: 'text' }} wrap label="名称（改行できます）" value={n.text} onChange={(v) => patch({ text: v })} />
         {/* A device's category has the row to itself; a piece of software's shares it with its version. */}
         {soft ? (
           <div className="grid2">
@@ -107,7 +107,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
           ) : (
             <p className="error">Web のアドレス（https://…）として読めません。</p>
           ))}
-        <Field freeText wrap label="備考" value={n.note} onChange={(v) => patch({ note: v })} />
+        <Field at={{ id: n.id, field: 'note' }} wrap label="備考" value={n.note} onChange={(v) => patch({ note: v })} />
       </Section>
       {/* A piece of software has no quantity, price, power or supplier: those belong to the gear it runs on. */}
       {!soft && (
@@ -208,7 +208,7 @@ export function DevicePanel({ n }: { n: DeviceNode }) {
             )}
             {ports(side).map((p) => (
               <div className="port-row" key={p.id}>
-                <PortName value={p.name} onChange={(v) => setPort(p.id, { name: v }, false)} />
+                <PortName at={{ id: n.id, field: 'port', port: p.id }} value={p.name} onChange={(v) => setPort(p.id, { name: v }, false)} />
                 <SignalSelect value={p.signal} onChange={(v) => setPort(p.id, { signal: v }, true)} />
                 <button className="mini" disabled={!takes('restack')} onClick={() => move(p.id, -1)} title="上へ">↑</button>
                 <button className="mini" disabled={!takes('restack')} onClick={() => move(p.id, 1)} title="下へ">↓</button>

@@ -212,8 +212,7 @@ test('a shared board turns away what it does not take yet, and a board of this m
   });
   await expect(a.locator('#canvas').getByText('貼り付けたメモ')).toHaveCount(1);
   await shape(a).click();
-  // Its text is typed on the board, not in the inspector's field yet. Its look is changed there.
-  await expect(a.locator('.inspector label.field', { hasText: 'テキスト' }).locator('textarea')).toBeDisabled();
+  // Its look is changed in the inspector.
   await expect(a.locator('.inspector .swatches button').first()).toBeEnabled();
   await expect(a.locator('.quickbar button[aria-label^="削除"]')).toHaveCount(1);
   await expect(a.locator('.quickbar button[aria-label^="文字を編集"]')).toHaveCount(1);

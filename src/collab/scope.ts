@@ -36,8 +36,9 @@ export type Attribute = (typeof ATTRIBUTES)[SharedType][number];
  * Besides every node's text, what a node holds that is typed by hand (a device's note, a legend's row
  * names). Written whole only when the node is put on the board: a whole new text put in place of one
  * someone else is typing into would lose their letters. Afterwards it is changed only by typing into
- * it (see typing.ts), as the board does with a node's text and a line's label; the inspector's
- * fields do not yet (see `fields`). A port's name and a line's texts (LINE_TEXTS) are kept the same way.
+ * it (see typing.ts), as the board does with a node's text and a line's label, and the inspector
+ * with each of them; never by setting it whole (see `rewriting`). A port's name and a line's texts
+ * (LINE_TEXTS) are kept the same way.
  */
 export const WRITTEN_ONCE: Partial<Record<SharedType, readonly string[]>> = {
   device: ['note'],
@@ -75,24 +76,27 @@ export const LINE_TEXTS = ['label', 'note'] as const;
 
 /**
  * An edit a board can be asked for besides changing its nodes: picking a tool, typing text in on the
- * board (`typing`), typing into the inspector's fields (`fields`: names, notes, a port's name, each
- * set whole as typed), making copies (duplicating, pasting), the order things are drawn or listed in
- * (nodes, a device's ports), the board's settings, pictures, a device being one with devices on
- * other boards (or software running on one), tidying the board up, comments, and taking the board off.
+ * board (`typing`), setting whole a text typed by hand (`rewriting`: a name, a note or a label
+ * filled in a cell of the lists, a picture's name taken from its file; where it is not taken, the
+ * inspector's fields type into the text instead), making copies (duplicating, pasting), the order
+ * things are drawn or listed in (nodes, a device's ports), the board's settings, pictures, a device
+ * being one with devices on other boards (or software running on one), tidying the board up,
+ * comments, and taking the board off.
  */
-export type EditKind = Tool | 'typing' | 'fields' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
+export type EditKind = Tool | 'typing' | 'rewriting' | 'copying' | 'restack' | 'settings' | 'images' | 'links' | 'tidy' | 'comments' | 'removing';
 
 /** What a shared board does not take yet. */
-const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'fields', 'settings', 'tidy']);
+const NOT_YET: ReadonlySet<EditKind> = new Set<EditKind>(['sequence', 'settings', 'tidy']);
 
 /** Whether the app runs in the desktop app, as main.tsx tells. */
 const inDesktopApp = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 /**
- * Whether a shared board takes an edit of this kind. Not pictures in the desktop app yet (#25): it
- * reaches the server by WebSocket only, so one put there would never be sent.
+ * Whether a shared board takes an edit of this kind. Never a text typed by hand set whole, which
+ * would lose what someone else is typing into it (see WRITTEN_ONCE). Not pictures in the desktop app
+ * yet (#25): it reaches the server by WebSocket only, so one put there would never be sent.
  */
-export const sharedTakes = (what: EditKind): boolean => !NOT_YET.has(what) && !(what === 'images' && inDesktopApp());
+export const sharedTakes = (what: EditKind): boolean => what !== 'rewriting' && !NOT_YET.has(what) && !(what === 'images' && inDesktopApp());
 
 /** What a shared project with no board takes: looking round, nothing to draw on. */
 export const emptyTakes = (what: EditKind): boolean => what === 'select' || what === 'pan';
@@ -102,5 +106,5 @@ export const SHARED_KINDS: readonly BoardKind[] = ['system', 'software', 'free']
 
 /** The above as the screen says it, and what it says when a shared board turns an edit away. */
 export const NOT_TAKEN = '共有中のボードでは、まだこの編集はできません';
-export const SHARED_SO_FAR = '図形・テキスト・機材・画像を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上での文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順、ほかのボードとの機材の共有と動作ホスト';
-export const NOT_SHARED_YET = 'インスペクタでの名前やメモなどの入力、ボードの設定';
+export const SHARED_SO_FAR = '図形・テキスト・機材・画像を置く・動かす・色などを変える・消す・複製する・貼り付ける操作と、ボードの上とインスペクタでの文字の入力、線・ポートの追加・つなぎ替え・削除、重なり順とポート・表の並び順、ほかのボードとの機材の共有と動作ホスト';
+export const NOT_SHARED_YET = '表での名称や備考などの入力、ボードの設定';
