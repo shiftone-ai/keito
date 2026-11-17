@@ -6,14 +6,16 @@ import { composing, isCatcher, isField, overBoard } from './keys';
  * The keys other apps use for the next and the previous tab: 1, −1, or 0 for any other key.
  * - ⌘⇧] / ⌘⇧[ (Ctrl+Shift on Windows), matched by e.key, not e.code: the keys sit elsewhere on a
  *   Japanese keyboard, and with ⌘ held the character may come shifted ({ }) or not.
+ * - ⌘⇧→ / ⌘⇧←, the same on any keyboard, but not while `typing` in a text field, where they select
+ *   the text to the line's ends (by words on Windows).
  * - ⌃Tab / ⌃⇧Tab, and Ctrl+PageDown / Ctrl+PageUp as on Windows: Ctrl without ⌘. With Shift,
  *   PageDown and PageUp move the tab itself in browsers rather than go to another.
  */
-export function tabStep(e: KeyboardEvent): -1 | 0 | 1 {
+export function tabStep(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>, typing: boolean): -1 | 0 | 1 {
   if (e.altKey) return 0;
   if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
-    if (e.key === ']' || e.key === '}') return 1;
-    if (e.key === '[' || e.key === '{') return -1;
+    if (e.key === ']' || e.key === '}' || (e.key === 'ArrowRight' && !typing)) return 1;
+    if (e.key === '[' || e.key === '{' || (e.key === 'ArrowLeft' && !typing)) return -1;
   }
   if (e.ctrlKey && !e.metaKey) {
     if (e.key === 'Tab') return e.shiftKey ? -1 : 1;
@@ -49,7 +51,7 @@ export function nextTab(step: 1 | -1): string | undefined {
  * (tabPlace). Undefined for any other key.
  */
 function tabFinder(e: KeyboardEvent): (() => string | undefined) | undefined {
-  const step = tabStep(e);
+  const step = tabStep(e, isField(e.target));
   if (step) return () => nextTab(step);
   const place = tabPlace(e);
   if (place === undefined) return undefined;

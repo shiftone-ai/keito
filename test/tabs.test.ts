@@ -161,8 +161,28 @@ describe('the keys for the next and the previous tab', () => {
     ['Tab', 0, press('Tab')],
     ['⌃⌥Tab', 0, press('Tab', { ctrl: true, alt: true })],
     ['Ctrl+Shift+PageDown', 0, press('PageDown', { ctrl: true, shift: true })],
+    ['⌘⇧}', 1, press('}', { meta: true, shift: true })],
+    ['Ctrl+Shift+[', -1, press('[', { ctrl: true, shift: true })],
+    ['⌘⇧→', 1, press('ArrowRight', { meta: true, shift: true })],
+    ['Ctrl+Shift+←', -1, press('ArrowLeft', { ctrl: true, shift: true })],
+    // ⌘+arrow alone goes on to the next shape.
+    ['⌘→', 0, press('ArrowRight', { meta: true })],
+    ['⌘⇧↑', 0, press('ArrowUp', { meta: true, shift: true })],
+    ['⌘⇧⌥]', 0, press(']', { meta: true, shift: true, alt: true })],
   ] as const)('%s steps %i', async (_, step, e) => {
     const { tabStep } = await import('../src/ui/tabKeys');
-    expect(tabStep(e)).toBe(step);
+    expect(tabStep(e, false)).toBe(step);
+  });
+
+  it.each([
+    // The edit is committed first, as a click on a tab does.
+    ['⌘⇧]', 1, press(']', { meta: true, shift: true })],
+    ['⌃Tab', 1, press('Tab', { ctrl: true })],
+    // These select the text to the line's ends (by words on Windows).
+    ['⌘⇧→', 0, press('ArrowRight', { meta: true, shift: true })],
+    ['Ctrl+Shift+←', 0, press('ArrowLeft', { ctrl: true, shift: true })],
+  ] as const)('%s in a text field steps %i', async (_, step, e) => {
+    const { tabStep } = await import('../src/ui/tabKeys');
+    expect(tabStep(e, true)).toBe(step);
   });
 });
