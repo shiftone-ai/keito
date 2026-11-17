@@ -326,7 +326,7 @@ test('typing in the inspector ends when the other browser takes off what is type
   expect([...a.errors, ...b.errors]).toEqual([]);
 });
 
-test('a name being typed in the inspector goes on into the shared device once the other browser makes its device one with it, and both boards then type into the one name, each keeping its own note and undoing its own typing', async ({ browser }) => {
+test('a name being typed in the inspector, a conversion under way in it, goes on into the shared device once the other browser makes its device one with it, and both boards then type into the one name, each keeping its own note and undoing its own typing', async ({ browser }) => {
   const [a, b] = await Promise.all([openLink(browser), openLink(browser)]);
   await putDevice(a, 'PC', 0, -120);
   await expect(device(b, 'PC')).toHaveCount(1);
@@ -339,19 +339,26 @@ test('a name being typed in the inspector goes on into the shared device once th
   await putDevice(a, 'PC', 0, 0);
   await clickOn(a, device(a, 'PC'));
   await focusAt(field(a, '名称'));
+  // Blink's own composition, as an IME drives it: a regression check, not a check of a real IME.
+  const ime = await a.context().newCDPSession(a);
+  await ime.send('Input.imeSetComposition', { text: 'かん', selectionStart: 2, selectionEnd: 2 });
   await clickOn(b, device(b, 'PC'));
   await inspector(b).locator('.shared-suggest button', { hasText: 'つなぐ' }).click();
   await expect(inspector(b).locator('.shared-list li', { hasText: '裏' })).toHaveCount(1);
   await expect(inspector(a).locator('.shared-list li', { hasText: '配置' })).toHaveCount(1);
 
-  // A types on in the field it was in, B in front of the name from its board.
+  // The conversion is as it was, and goes down in the shared name; A types on in the field it was in, B in front of the name from its board.
   await expect(field(a, '名称')).toBeFocused();
+  await expect(field(a, '名称')).toHaveValue('PCかん');
+  await ime.send('Input.imeSetComposition', { text: '漢', selectionStart: 1, selectionEnd: 1 });
+  await ime.send('Input.insertText', { text: '漢' });
+  await expect(device(b, 'PC漢')).toHaveCount(1);
   await a.keyboard.type('-1');
   await focusAt(field(b, '名称'), 0);
   await b.keyboard.type('主 ');
   for (const page of [a, b]) {
-    await expect(field(page, '名称')).toHaveValue('主 PC-1');
-    await expect(device(page, '主 PC-1')).toHaveCount(1);
+    await expect(field(page, '名称')).toHaveValue('主 PC漢-1');
+    await expect(device(page, '主 PC漢-1')).toHaveCount(1);
   }
   // The note is the second board's alone.
   await focusAt(field(a, '備考'));

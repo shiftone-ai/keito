@@ -74,10 +74,21 @@ export function TypedBox({ at, value, lines = 'one', placeholder }: { at: TextAt
     const field = boxField(el);
     field.write(session.value(), field.read().range);
     const listening = new AbortController();
-    /** The text is no longer where it was: typed into where it is now (its device made one with another board's), if it is anywhere. */
+    /**
+     * The text is no longer where it was: the typing goes on where it is now (its device made one
+     * with another board's), a conversion under way with it, or ends when it is nowhere.
+     */
     const gone = (): void => {
-      close();
-      open();
+      const now = typed.current;
+      if (!now) return;
+      now.session.end(true);
+      const next = useStore.getState().typeInto(at, false);
+      if (!next) {
+        el.readOnly = true;
+        return close();
+      }
+      now.session = next;
+      now.typing.follow(next);
     };
     const typing = bindField(field, session, { gone });
     hearTyping(el, typing, listening.signal);

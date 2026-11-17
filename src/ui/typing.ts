@@ -27,6 +27,12 @@ export interface Typing {
   redo(): void;
   /** Send what the field holds now. */
   flush(): void;
+  /**
+   * Go on with `next`, a typing into the text where it is now, the one before being gone (see
+   * bindField's `gone`): what the text holds there is shown as others' typing is, and what is typed
+   * and not yet sent (a conversion under way) goes into it.
+   */
+  follow(next: TextSession): void;
   /** Stop keeping the field with the text. */
   close(): void;
 }
@@ -47,9 +53,12 @@ function mapRange([anchor, focus]: TextRange, delta: TextDelta): TextRange {
  * a change to the text (never the field's whole text in place of it); what others type is shown in
  * the field with the selection kept on what it was on. While the IME converts, the field is left
  * alone and what others type is held back, to be shown once the conversion is put down, which goes
- * where it was typed. `typed`: after a change typed is sent; `gone`: the text is no longer there.
+ * where it was typed. `typed`: after a change typed is sent; `gone`: the text is no longer there
+ * (the field may then `follow` a typing into it elsewhere).
  */
-export function bindField(field: TextField, session: TextSession, on: { typed?(): void; gone?(): void } = {}): Typing {
+export function bindField(field: TextField, first: TextSession, on: { typed?(): void; gone?(): void } = {}): Typing {
+  /** The typing the field is kept with: `first`, then one the field follows. */
+  let session = first;
   /** The text as the field shows it with every change typed there sent: what the next change is read against. */
   let shown = field.read().text;
   /** What others did to the text and the field does not show yet, in order, each a change to what the one before made of `shown`. */
@@ -99,11 +108,13 @@ export function bindField(field: TextField, session: TextSession, on: { typed?()
     show();
   };
 
-  const stop = session.listen((heard) => {
+  /** Take in what others did to the text, shown now unless a conversion is under way. */
+  const hear = (heard: TextDelta | null): void => {
     if (!heard) return on.gone?.();
     unseen.push(heard);
     if (!composing && ending === undefined) sync();
-  });
+  };
+  let stop = session.listen(hear);
 
   function flush(): void {
     settle();
@@ -152,6 +163,14 @@ export function bindField(field: TextField, session: TextSession, on: { typed?()
       session.redo();
     },
     flush,
+    follow(next) {
+      stop();
+      session = next;
+      stop = next.listen(hear);
+      // In place of what was heard of the text before: all of that is in what the text holds now.
+      unseen = [];
+      hear(deltaBetween(shown, next.value(), 0));
+    },
     close() {
       settle();
       stop();
