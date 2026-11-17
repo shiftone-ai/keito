@@ -117,3 +117,35 @@ test('a move made offline, then turned away as the invite was revoked, is shown 
     await context.close();
   }
 });
+
+test('a word typed offline is one unsent change in the top bar, and in the band once the invite is revoked, where the participants are no longer offered', async ({ baseURL }) => {
+  const { context, page } = await launch(baseURL, []);
+  try {
+    await page.goto(`/#/s/${project}?${new URLSearchParams({ server: server.url, token })}`);
+    await expect(page.locator('.save-state')).toHaveText('共同編集先に保存済み');
+    await expect(page.locator('.participants')).toHaveCount(1);
+    const { port } = server;
+    await server.kill();
+    await expect(page.locator('.save-state')).toContainText('オフライン');
+
+    const at = (await shape(page).boundingBox())!;
+    await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.text-editor')).toBeFocused();
+    // After the name, all of which is selected as it opens: each letter is sent on its own.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.type('offline-memo');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect(page.locator('#canvas')).toContainText('図形offline-memo');
+    await expect(page.locator('.save-state')).toContainText('オフライン・未送信 1 件');
+    await expect(page.locator('.participants')).toHaveCount(1);
+
+    administer(data, (store) => store.revokeGrant(store.grantOf(token)!));
+    server = await startServer(data, port);
+    // The page comes back by itself, after a wait that grows with each try.
+    await expect(page.locator('.rev-banner.refused')).toContainText('未送信の変更 1 件は送れません', { timeout: 30_000 });
+    await expect(page.locator('.participants')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
