@@ -1,13 +1,14 @@
 import * as Y from 'yjs';
 import { wholeDevice } from '../model/load';
 import { COLOR_KEYS } from '../model/signals';
+import type { TextAt } from '../model/target';
 import { FILL_STYLES, type Node, SHAPE_KINDS } from '../model/types';
 import { isParticular, placedFrom, putLinks, readLinks, writeShared } from './devices';
 import type { BoardEdit, Change } from './edits';
-import { type Check, type YMap, isBoolean, isNumber, isString, moveEntries, oneOf, orderRange, textOf } from './entries';
+import { type Check, type TextPlace, type YMap, isBoolean, isNumber, isString, moveEntries, oneOf, orderRange, textOf } from './entries';
 import { isSharedSrc } from './pictureRef';
-import { putPorts, readPorts, writePorts } from './ports';
-import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
+import { portNamePlace, putPorts, readPorts, writePorts } from './ports';
+import { ATTRIBUTES, type Attribute, type SharedType, WRITTEN_ONCE, isShared } from './scope';
 
 /**
  * A node of a shared board as the project holds it (see model.ts for the rest of the project):
@@ -18,9 +19,9 @@ import { ATTRIBUTES, type Attribute, type SharedType, isShared } from './scope';
  * image:  … src: the project's picture (see pictureRef.ts), caption: Y.Text
  *
  * Each attribute is a key of its own (see ATTRIBUTES in scope.ts), so people changing different
- * attributes of one node keep all their changes. What is typed by hand is a Y.Text. `order` is its
- * place in the order the board is drawn in (see order.ts); its places in the lists put in order by
- * hand are listOrder.ts's.
+ * attributes of one node keep all their changes. What is typed by hand is a Y.Text; the name a legend
+ * gives a row is there only once it is typed (see typing.ts). `order` is its place in the order the
+ * board is drawn in (see order.ts); its places in the lists put in order by hand are listOrder.ts's.
  */
 
 /** What a value written under each attribute must be to be read back: anything else is left unread. */
@@ -104,17 +105,22 @@ const PARTS: Partial<Record<SharedType, { read(node: YMap): Record<string, unkno
   },
   image: {
     read: (node) => ({ caption: textOf(node.get('caption')) || undefined }),
+    // With every picture, captioned or not: a caption two people began at once would otherwise be two texts, one of them lost.
     write(node, n) {
-      if (n.type === 'image' && n.caption !== undefined) node.set('caption', new Y.Text(n.caption));
+      if (n.type === 'image') node.set('caption', new Y.Text(n.caption ?? ''));
     },
   },
   legend: {
     read(node) {
       const held = node.get('names');
-      if (!(held instanceof Y.Map) || !held.size) return { names: undefined };
       const names: Record<string, string> = {};
-      (held as YMap).forEach((name, row) => (names[row] = textOf(name)));
-      return { names };
+      // A name emptied is no name: its text stays there, to be typed into again (see typing.ts).
+      if (held instanceof Y.Map)
+        (held as YMap).forEach((name, row) => {
+          const text = textOf(name);
+          if (text) names[row] = text;
+        });
+      return { names: Object.keys(names).length ? names : undefined };
     },
     write(node, n) {
       if (n.type !== 'legend') return;
@@ -146,6 +152,32 @@ export function nodeOf(id: string, node: YMap): Node | null {
   const read = { ...out, ...PARTS[type]?.read(node), ...links } as unknown as Node;
   // Made whole as a device read from a file is, so that one comes out the same on either.
   return read.type === 'device' ? wholeDevice(read) : read;
+}
+
+/**
+ * Where a node holds a text typed by hand (see TextAt), there yet or not; null for one a node of its
+ * kind does not hold. The name of a device placed from a shared device is the shared device's (see
+ * devices.ts).
+ */
+export function nodeTextPlace(node: YMap, at: TextAt): TextPlace | null {
+  const type = node.get('type');
+  switch (at.field) {
+    case 'text': {
+      const holder = isString(node.get('shared')) ? placedFrom(node) : node;
+      return holder && { holder, key: 'text' };
+    }
+    case 'note':
+    case 'caption':
+      return isShared(type) && WRITTEN_ONCE[type]?.includes(at.field) ? { holder: node, key: at.field } : null;
+    case 'port':
+      return portNamePlace(node, at.port);
+    case 'row': {
+      const names = node.get('names');
+      return names instanceof Y.Map ? { holder: names as YMap, key: at.row } : null;
+    }
+    default:
+      return null;
+  }
 }
 
 /** Write a new node into a board's nodes. */

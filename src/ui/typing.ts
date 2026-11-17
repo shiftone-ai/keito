@@ -4,7 +4,11 @@ import type { TextSession } from '../model/target';
 /** What of a field's text is selected: where the selection began and where it ends (the caret), one place for a caret alone. */
 export type TextRange = readonly [anchor: number, focus: number];
 
-/** A field typed into, as plain text: what it shows and what of it is selected. */
+/**
+ * A field typed into, as plain text: what it shows and what of it is selected. It shows a text
+ * character for character (one it cannot show, as another: a place in what it shows is a place in
+ * the text).
+ */
 export interface TextField {
   read(): { text: string; range: TextRange };
   /** Show `text`, with `range` selected. */
@@ -84,8 +88,9 @@ export function bindField(field: TextField, session: TextSession, on: { typed?()
     let range = field.read().range;
     for (const heard of unseen) range = mapRange(range, heard);
     unseen = [];
-    shown = session.value();
-    field.write(shown, range);
+    field.write(session.value(), range);
+    // Not the text itself: a character the field shows as another (a line break, on one line) is not one typed there.
+    shown = field.read().text;
   }
 
   /** Send what was typed, then show what others did. */

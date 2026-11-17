@@ -65,11 +65,15 @@ export interface Edits {
   typeInto(at: TextAt, joins: boolean): TextSession | null;
 }
 
-/** A text of the board typed by hand: one of a node's (`text`, a device's `note`) or a line's (`label`, `note`), by its id. Where it is shown has no part in it. */
-export interface TextAt {
-  id: string;
-  field: 'text' | 'label' | 'note';
-}
+/**
+ * A text of the board typed by hand, by the id of the node or line it is of: a node's `text`, a
+ * device's `note`, a picture's `caption`, a line's `label` or `note`, the name of a device's `port`,
+ * or the name a legend gives a `row` (see LegendNode.names). Where it is shown has no part in it.
+ */
+export type TextAt =
+  | { id: string; field: 'text' | 'label' | 'note' | 'caption' }
+  | { id: string; field: 'port'; port: string }
+  | { id: string; field: 'row'; row: string };
 
 /**
  * Typing into one text, which others may be typing into at the same time: each change goes in as
