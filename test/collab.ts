@@ -55,10 +55,12 @@ export interface RunningServer {
 /**
  * Run the collaboration server as its own process on a free port, over the SQLite file in `data`.
  * With `output`, every line the server prints (stdout and stderr) is pushed there instead of shown.
+ * `serve`: what `serve` is given besides, as options (`args`) or in its environment (`env`).
  */
-export async function startServer(data: string, port = 0, output?: string[]): Promise<RunningServer> {
-  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', 'server/collab/cli.ts', 'serve', '--data', data, '--host', '127.0.0.1', '--port', String(port)], {
+export async function startServer(data: string, port = 0, output?: string[], serve: { args?: string[]; env?: Record<string, string> } = {}): Promise<RunningServer> {
+  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', 'server/collab/cli.ts', 'serve', '--data', data, '--host', '127.0.0.1', '--port', String(port), ...(serve.args ?? [])], {
     stdio: ['ignore', 'pipe', output ? 'pipe' : 'inherit'],
+    env: { ...process.env, ...serve.env },
   });
   const lines = createInterface({ input: child.stdout! });
   if (output) createInterface({ input: child.stderr! }).on('line', (line) => output.push(line));

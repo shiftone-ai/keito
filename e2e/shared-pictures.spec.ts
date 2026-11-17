@@ -183,3 +183,24 @@ test('a picture replaced on a shared board with a file of another name is shown 
   await expect.poll(() => shownText(b)).toContain('改訂版');
   await expect(a.locator('.inspector label.field', { hasText: '名前' }).locator('input')).toHaveValue('配置図');
 });
+
+test('a picture the server has no room for says so on the board that sent it, and the board goes on being stored', async ({ browser }) => {
+  const [first, second] = [svgFile('一枚目'), svgFile('二枚目')];
+  await server.kill();
+  // Room for the first of them alone.
+  server = await startServer(data, 0, undefined, { args: ['--pictures-per-project', String(first.buffer.length + second.buffer.length - 1)] });
+  const a = await newBrowser(browser);
+  const b = await newBrowser(browser);
+  await insert(a, first);
+  await expect(shown(b)).toHaveCount(1);
+  await insert(a, second);
+  await expect(badge(a)).toHaveText('案件の画像の容量が足りません');
+  await expect(a.locator('.save-state')).toHaveText(/共同編集先に保存できていません/);
+  await expect(a.locator('.save-state')).toHaveAttribute('title', /案件の画像の容量が足りません）\n自動では送り直しません。「もう一度」/);
+  await expect(placeholder(b)).toHaveText('画像の到着待ち');
+
+  // Taken off the board by whoever put it there, the picture that was turned away goes for everyone.
+  await a.keyboard.press('Delete');
+  await expect(placeholder(b)).toHaveCount(0);
+  await expect(shown(b)).toHaveCount(1);
+});

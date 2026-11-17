@@ -14,7 +14,8 @@ const roleOf = (stored: unknown): Role => (stored === 'viewer' ? 'viewer' : 'edi
  * has been initialized (`initProject`): an empty or unknown document is never taken for a new one.
  * A deleted project keeps its row and its state, marked `deleted_at`, until it is restored.
  * A grant is an invite to one project, with its role: it keeps only the hash of its secret, and stays,
- * marked `revoked_at`, once revoked.
+ * marked `revoked_at`, once revoked. A picture of a project found to be used by no board is marked
+ * with when it was found so, `found_at` (see pictureSweep.ts).
  */
 export function openStore(file: string) {
   // A write the server waits on is answered within the timeout or fails: the server answers the
@@ -48,6 +49,12 @@ export function openStore(file: string) {
       created_at TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'editor',
       revoked_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS unused_pictures (
+      project TEXT NOT NULL REFERENCES projects(id),
+      name TEXT NOT NULL,
+      found_at TEXT NOT NULL,
+      PRIMARY KEY (project, name)
     );
   `);
 
@@ -93,6 +100,10 @@ export function openStore(file: string) {
     addOp: db.prepare('INSERT INTO ops (project, op, saved_at) VALUES (?, ?, ?)'),
     setState: db.prepare('UPDATE projects SET state = ? WHERE id = ?'),
     dropEdits: db.prepare('DELETE FROM updates WHERE project = ?'),
+    unused: db.prepare('SELECT name, found_at FROM unused_pictures WHERE project = ?'),
+    markUnused: db.prepare('INSERT OR IGNORE INTO unused_pictures (project, name, found_at) VALUES (?, ?, ?)'),
+    unmarkUnused: db.prepare('DELETE FROM unused_pictures WHERE project = ? AND name = ?'),
+    unmarkAllUnused: db.prepare('DELETE FROM unused_pictures WHERE project = ?'),
   };
 
   return {
@@ -156,9 +167,16 @@ export function openStore(file: string) {
       return sql.markDeleted.run(now(), id).changes > 0;
     },
 
-    /** Bring a deleted project back as it was when deleted. False when there is no such deleted project. */
+    /**
+     * Bring a deleted project back as it was when deleted, its pictures unused anew from now (see
+     * pictureSweep.ts). False when there is no such deleted project.
+     */
     restoreProject(id: string): boolean {
-      return sql.unmarkDeleted.run(id).changes > 0;
+      return inTransaction(() => {
+        if (!sql.unmarkDeleted.run(id).changes) return false;
+        sql.unmarkAllUnused.run(id);
+        return true;
+      });
     },
 
     /** The project's Yjs state as stored, or null for a project never initialized. */
@@ -196,6 +214,22 @@ export function openStore(file: string) {
         sql.setState.run(state, project);
         sql.dropEdits.run(project);
       });
+    },
+
+    /** The pictures of a project marked as used by no board, each with when (ms) it was found so. */
+    unusedPictures(project: string): Map<string, number> {
+      return new Map(sql.unused.all(project).map((r) => [String(r.name), Date.parse(String(r.found_at))]));
+    },
+
+    /** Mark pictures of a project as found, at `found` (ms), to be used by no board. One marked before keeps its time. */
+    markUnusedPictures(project: string, names: readonly string[], found: number): void {
+      const at = new Date(found).toISOString();
+      inTransaction(() => names.forEach((name) => sql.markUnused.run(project, name, at)));
+    },
+
+    /** Take the mark off pictures of a project. */
+    unmarkUnusedPictures(project: string, names: readonly string[]): void {
+      inTransaction(() => names.forEach((name) => sql.unmarkUnused.run(project, name)));
     },
 
     close(): void {

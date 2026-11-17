@@ -71,7 +71,8 @@ const LOOK = (
  * edits, not when it has them; until then, whether this device keeps them. A viewer, who saves
  * nothing, is shown that it only looks, and whether it is connected. Turned away by the server, it
  * shows only that the edits are not sent, and whether this device keeps them: what can be done with
- * them is the banner's over the board (see RefusedBanner).
+ * them is the banner's over the board (see RefusedBanner). A failure to store says, on hover, why
+ * and whether it is tried again by itself: a picture the server turned away is not.
  */
 function SharedSaveState({ collab, saving, saveError, project }: { collab: CollabState; saving: State['saving']; saveError: string | null; project: string }) {
   const { pending, link, device, unkept } = collab;
@@ -93,10 +94,12 @@ function SharedSaveState({ collab, saving, saveError, project }: { collab: Colla
       </span>
     );
   const shared = `共有中の案件「${project}」（試験中: ${SHARED_SO_FAR}を共有します）`;
+  const pictures = collab.pictures.status();
+  const next = pictures.turnedAway && pictures.failure === saveError ? '自動では送り直しません。「もう一度」を押すと送り直します。' : '少しずつ間をあけて自動でやり直しています。';
   const [text, tip] = unkept
     ? ['本端末に保存できていません', saveError ?? '理由は不明']
     : saving === 'error'
-      ? ['共同編集先に保存できていません', `理由: ${saveError ?? '不明'}\n少しずつ間をあけて自動でやり直しています。`]
+      ? ['共同編集先に保存できていません', `理由: ${saveError ?? '不明'}\n${next}`]
       : pending && link !== 'online'
         ? [`オフライン・未送信 ${pending} 件`, shared]
         : [pending ? '共同編集先に保存中…' : link !== 'online' ? 'オフライン' : '共同編集先に保存済み', shared];
