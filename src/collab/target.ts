@@ -110,7 +110,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   });
   const peers = followPeers(project.presence, host);
   const stop = project.listen(refresh);
-  /** Managing the boards as a viewer is offered it: each asked for is refused, as the server would. */
+  /** Managing the boards where the project is only looked at: the screen offers none of it (see projectLookingOnly), and each asked for all the same is refused, as the server would. */
   const viewOnly: BoardManagement = { add: host.refuse, rename: host.refuse, restore: host.refuse, renameProject: host.refuse };
   const recover: Recovery = {
     async copy() {
