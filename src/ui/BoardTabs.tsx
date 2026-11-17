@@ -1,3 +1,4 @@
+import { projectLookingOnly } from '../collab/role';
 import { KINDS, tabOrder } from '../model/kinds';
 import { useStore } from '../model/store';
 import type { Doc } from '../model/types';
@@ -53,6 +54,7 @@ export function BoardTabs() {
   const current = useStore((s) => s.doc.id);
   const project = useStore((s) => s.doc.meta.project?.trim());
   const tabs = useProjectTabs();
+  const looking = useStore(projectLookingOnly);
   return (
     <nav className="board-tabs" aria-label="同じ案件のボード">
       {tabs.map((b) => {
@@ -64,9 +66,11 @@ export function BoardTabs() {
           </button>
         );
       })}
-      <button className="board-tab add" data-tip={project ? `「${project}」に新しいボードを追加` : '新しいボード'} aria-label="新しいボード" onClick={() => openBoards(true)}>
-        ＋
-      </button>
+      {!looking && (
+        <button className="board-tab add" data-tip={project ? `「${project}」に新しいボードを追加` : '新しいボード'} aria-label="新しいボード" onClick={() => openBoards(true)}>
+          ＋
+        </button>
+      )}
       {!project && <span className="board-tabs-hint">ボード設定で案件名を付けると、同じ案件のボードがここにタブで並びます</span>}
     </nav>
   );

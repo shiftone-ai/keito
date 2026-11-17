@@ -1739,6 +1739,8 @@ body.row-dragging .lists td.editable:hover {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+  /* Not left to what is on it: with no tab and no ＋ (a shared project with no board, only looked at), the strip would close up to its padding. Its padding, a tab and its bottom line. */
+  min-height: calc(6px + 30px + 1px);
 }
 .board-tabs .board-tab {
   --kind: #2563eb;

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { SharedBoardInfo } from '../collab/boards';
+import { projectLookingOnly } from '../collab/role';
 import { SHARED_KINDS } from '../collab/scope';
 import { type BoardKind, KINDS, tabOrder } from '../model/kinds';
 import { type CollabState, useStore } from '../model/store';
@@ -52,15 +53,20 @@ function DeletedCard({ board, collab, done }: { board: SharedBoardInfo; collab: 
 /**
  * The shared project on screen in the boards window: its boards (a click opens one), a board added
  * for everyone, a board or the project renamed, and the deleted boards brought back. What is done
- * here reaches everyone in the project.
+ * here reaches everyone in the project. Only looked at (see projectLookingOnly), the project offers
+ * its boards to open, and nothing else.
  */
 export function SharedProjectBoards({ collab, withForm, close }: { collab: CollabState; withForm: boolean; close: () => void }) {
   const st = useStore.getState;
   const current = useStore((s) => s.doc.id);
   const project = useStore((s) => s.doc.meta.project ?? '');
-  const [form, setForm] = useState<{ kind: BoardKind; title: string } | null>(withForm ? { kind: SHARED_KINDS[0], title: '' } : null);
+  const looking = useStore(projectLookingOnly);
+  const [formOpen, setForm] = useState<{ kind: BoardKind; title: string } | null>(withForm ? { kind: SHARED_KINDS[0], title: '' } : null);
   /** The board being renamed, or '' for the project. */
-  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renamingNow, setRenaming] = useState<string | null>(null);
+  // Not the states as they are: a form or a name left open when the server turns the page away would stay, to be refused once kept.
+  const form = looking ? null : formOpen;
+  const renaming = looking ? null : renamingNow;
   const add = (f: { kind: BoardKind; title: string }) => {
     collab.manage.add(f.title, f.kind);
     close();
@@ -81,13 +87,13 @@ export function SharedProjectBoards({ collab, withForm, close }: { collab: Colla
         ) : (
           <h3>{project}</h3>
         )}
-        {renaming !== '' && (
+        {renaming !== '' && !looking && (
           <button className="mini" data-tip="参加している全員の画面で案件名が変わります" onClick={() => setRenaming('')}>
             名前を変える
           </button>
         )}
         <span className="grow" />
-        {!form && (
+        {!form && !looking && (
           <button className="primary" onClick={() => setForm({ kind: SHARED_KINDS[0], title: '' })}>
             ＋ 新しいボード
           </button>
@@ -153,22 +159,24 @@ export function SharedProjectBoards({ collab, withForm, close }: { collab: Colla
               ) : (
                 <span className="foot">
                   <small>{b.id === current ? '表示中' : ''}</small>
-                  <button
-                    className="mini"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRenaming(b.id);
-                    }}
-                  >
-                    名前を変える
-                  </button>
+                  {!looking && (
+                    <button
+                      className="mini"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenaming(b.id);
+                      }}
+                    >
+                      名前を変える
+                    </button>
+                  )}
                 </span>
               )}
             </div>
           );
         })}
       </div>
-      {collab.deleted.length > 0 && (
+      {collab.deleted.length > 0 && !looking && (
         <>
           <h4 className="deleted-head">削除したボード</h4>
           <div className="board-cards">
@@ -182,8 +190,10 @@ export function SharedProjectBoards({ collab, withForm, close }: { collab: Colla
   );
 }
 
-/** On the canvas of a shared project with no board: a board to add, or a deleted one to bring back. */
+/** On the canvas of a shared project with no board: a board to add, or a deleted one to bring back. Nothing where the project is only looked at (see projectLookingOnly). */
 export function EmptyProject({ collab, add }: { collab: CollabState; add: () => void }) {
+  const looking = useStore(projectLookingOnly);
+  if (looking) return null;
   return (
     <div className="empty-project">
       <button className="primary" onClick={add}>

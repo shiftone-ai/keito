@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { type CellEdit, TABLES, type Table, bands, clearOrder, dragIn, editCell, editable, moveRow } from '../model/lists';
+import { lookingOnly } from '../collab/role';
 import { kindOf } from '../model/kinds';
 import { allSignals, groupSignals } from '../model/signals';
 import { reveal, useStore, useTakes } from '../model/store';
@@ -16,6 +17,7 @@ export function ListsPanel() {
   const doc = useStore((s) => s.doc);
   const selection = useStore((s) => s.selection);
   const takes = useTakes();
+  const looking = useStore(lookingOnly);
   const [tab, setTab] = useState(0);
   // The cell being edited in place, by its row and column in the table on show.
   const [copied, setCopied] = useState(false);
@@ -30,9 +32,12 @@ export function ListsPanel() {
   // A board with no lists (a sequence or free board) shows none, even if the panel was left open.
   if (!t) return null;
   const cellEdit = (row: number, col: number): CellEdit | null => {
+    if (looking) return null;
     const edit = editable(t, row, col);
     return edit && (takes('rewriting') || !TYPED.has(edit.field)) ? edit : null;
   };
+  /** The name the table's order by hand is kept under (see Table.reorder); none on a board only looked at, whose rows stay as they are. */
+  const reorder = looking ? undefined : t.reorder;
   // The rows in the order they are shown: while a row is dragged, already where it would go.
   const order = t.rows.map((_, i) => i);
   if (drag) order.splice(drag.to, 0, ...order.splice(drag.from, 1));
@@ -186,8 +191,8 @@ export function ListsPanel() {
             総ケーブル長 <b>{totalLength}</b> m
           </span>
         )}
-        {t.reorder && doc.listOrder?.[t.reorder] && (
-          <button className="list-tool" title="ドラッグで決めた並びをやめ、この表のいつもの順に戻します" onClick={() => useStore.getState().setDoc(clearOrder(useStore.getState().doc, t.reorder!))}>
+        {reorder && doc.listOrder?.[reorder] && (
+          <button className="list-tool" title="ドラッグで決めた並びをやめ、この表のいつもの順に戻します" onClick={() => useStore.getState().setDoc(clearOrder(useStore.getState().doc, reorder))}>
             {ICON.reset}
             並びを元に戻す
           </button>
@@ -217,7 +222,7 @@ export function ListsPanel() {
         <table>
           <thead>
             <tr>
-              {t.reorder && <th className="grip" />}
+              {reorder && <th className="grip" />}
               {t.head.map((h) => (
                 <th key={h} className={t.numeric?.includes(h) ? 'num' : ''}>
                   {h}
@@ -246,7 +251,7 @@ export function ListsPanel() {
                   reveal(t.refs[i]);
                 }}
               >
-                {t.reorder &&
+                {reorder &&
                   (t.total && i === t.rows.length - 1 ? (
                     <td className="grip" />
                   ) : (
@@ -259,7 +264,7 @@ export function ListsPanel() {
                 {row.map((c, j) => {
                   const edit = cellEdit(i, j);
                   // The row number is a handle too: a wider target than the grip alone.
-                  const handle = !!t.reorder && t.head[j] === 'No' && !(t.total && i === t.rows.length - 1);
+                  const handle = !!reorder && t.head[j] === 'No' && !(t.total && i === t.rows.length - 1);
                   const cls = [t.numeric?.includes(t.head[j]) ? 'num' : '', edit ? 'editable' : '', handle ? 'handle' : ''].filter(Boolean).join(' ');
                   if (edit && editing?.row === i && editing.col === j)
                     return (
@@ -293,7 +298,7 @@ export function ListsPanel() {
             })}
             {!t.rows.length && (
               <tr>
-                <td colSpan={t.head.length + (t.reorder ? 1 : 0)} className="empty">{t.empty ?? '機材ライブラリから機材を置き、ポート同士をドラッグで結ぶとここに自動で一覧が出ます。'}</td>
+                <td colSpan={t.head.length + (reorder ? 1 : 0)} className="empty">{t.empty ?? '機材ライブラリから機材を置き、ポート同士をドラッグで結ぶとここに自動で一覧が出ます。'}</td>
               </tr>
             )}
           </tbody>
