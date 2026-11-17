@@ -159,8 +159,8 @@ export interface State {
   dropStep(): void;
   /** Finish the active operation. */
   commitOperation(): void;
-  /** Replace the doc. `record` adds an undo step. */
-  setDoc(doc: Doc, record?: boolean): void;
+  /** Replace the doc. `record` adds an undo step; `moved` as for Edits.edit. */
+  setDoc(doc: Doc, record?: boolean, moved?: ReadonlySet<string>): void;
   mutate(fn: (d: Doc) => Doc, record?: boolean): void;
   updateNode(id: string, patch: Partial<Node>, record?: boolean): void;
   updateEdge(id: string, patch: Partial<Edge>, record?: boolean): void;
@@ -323,11 +323,11 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       checkpoint,
       dropStep,
       commitOperation,
-      setDoc: (doc, record = true) => {
+      setDoc: (doc, record = true, moved) => {
         // An earlier state on screen is for looking at: an edit there would be lost, or restored
         // along with it unseen.
         if (get().viewing) return;
-        target.edits.edit(doc, record);
+        target.edits.edit(doc, record, moved);
       },
       mutate: (fn, record = true) => get().setDoc(fn(get().doc), record),
       updateNode: (id, patch, record = true) =>
@@ -1586,7 +1586,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     const picked = s.doc.nodes.filter((n) => ids.has(n.id));
     if (!picked.length) return;
     const rest = s.doc.nodes.filter((n) => !ids.has(n.id));
-    s.mutate((d) => ({ ...d, nodes: where === 'front' ? [...rest, ...picked] : [...picked, ...rest] }));
+    s.setDoc({ ...s.doc, nodes: where === 'front' ? [...rest, ...picked] : [...picked, ...rest] }, true, ids);
   }
 
   function align(mode: 'left' | 'top' | 'hcenter' | 'vcenter' | 'hspace' | 'vspace'): void {
