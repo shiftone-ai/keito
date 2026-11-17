@@ -5,7 +5,7 @@ import { type Denial, type Need, authenticate, authorize } from './access';
 import type { NoRoom, PictureStore } from './pictureStore';
 import type { CollabStore } from './store';
 
-/** What a project id must look like to be made a folder of (the ids `initProject` gives are UUIDs). */
+/** What a project id must look like for pictures to be kept under it (the ids `initProject` gives are UUIDs). */
 const PROJECT = /^[A-Za-z0-9_-]{1,80}$/;
 
 /** Why a request is answered with an error, as its JSON body says. */

@@ -4,7 +4,7 @@
  *
  *   serve [--port 1235] [--host 0.0.0.0]        run the server
  *         [--pictures-per-project 10GB]         … the most a project's pictures take together
- *         [--min-free-disk 5GB]                 … the free space a picture kept leaves on the disk
+ *         [--min-free-disk 5GB]                 … the free space a picture kept leaves on the disk they are kept on
  *         [--keep-unused-pictures 30d]          … how long a picture no board uses is kept
  *   init <案件名> [--board <ボード名>]            make a shared project (one board, one shape)
  *        [--kind system|software|free]           … the kind of board (default: free)
@@ -25,6 +25,7 @@ import { parseArgs } from 'node:util';
 import { sharedAddress } from '../../src/collab/join';
 import { type Role, isRole } from '../../src/collab/protocol';
 import { type BoardKind, KIND_ORDER } from '../../src/model/kinds';
+import { diskPictures } from './diskPictures';
 import { pictureStore } from './pictureStore';
 import { collabServer } from './server';
 import { openStore } from './store';
@@ -77,13 +78,12 @@ if (command === 'serve') {
   const perProject = values['pictures-per-project'] ?? process.env.KEITO_COLLAB_PICTURES_PER_PROJECT ?? '10GB';
   const minFree = values['min-free-disk'] ?? process.env.KEITO_COLLAB_MIN_FREE_DISK ?? '5GB';
   const keepUnused = values['keep-unused-pictures'] ?? process.env.KEITO_COLLAB_KEEP_UNUSED_PICTURES ?? '30d';
-  const limits = {
-    perProject: amountOf(perProject, BYTES) ?? fail(`案件ごとの画像の合計の上限が正しくありません: ${perProject}（例: 10GB・500MB）`),
-    minFree: amountOf(minFree, BYTES) ?? fail(`ディスクの空きの下限が正しくありません: ${minFree}（例: 5GB・500MB）`),
-  };
   const keepUnusedMs = amountOf(keepUnused, MILLISECONDS) ?? 0;
   if (keepUnusedMs < MILLISECONDS.s) fail(`使われない画像を消すまでの期間が正しくありません: ${keepUnused}（例: 30d・12h。1 秒以上）`);
-  const server = collabServer(store, { port, address: host, pictures: pictureStore(join(folder, 'pictures'), limits), keepUnusedMs });
+  // Where the pictures' bytes are kept is chosen here alone: the server's disk, beside its SQLite file.
+  const disk = diskPictures(join(folder, 'pictures'), { minFree: amountOf(minFree, BYTES) ?? fail(`ディスクの空きの下限が正しくありません: ${minFree}（例: 5GB・500MB）`) });
+  const pictures = pictureStore(disk, { perProject: amountOf(perProject, BYTES) ?? fail(`案件ごとの画像の合計の上限が正しくありません: ${perProject}（例: 10GB・500MB）`) });
+  const server = collabServer(store, { port, address: host, pictures, keepUnusedMs });
   await server.listen();
   console.log(`画像: 案件ごとの合計 ${perProject} まで・ディスクの空き ${minFree} を残す・使われない画像は ${keepUnused} で消す`);
   // One line, read by whoever started the server (the tests read the port from it).

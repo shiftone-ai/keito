@@ -74,7 +74,7 @@ const DENIALS: Record<string, string> = {
   deleted: '案件が削除されています',
   'too-large': '画像が 64MB を超えています',
   'project-full': '案件の画像の容量が足りません',
-  'disk-full': '共同編集先の空き容量が足りません',
+  'store-full': '共同編集先の空き容量が足りません',
 };
 
 async function denialOf(res: Response): Promise<string> {

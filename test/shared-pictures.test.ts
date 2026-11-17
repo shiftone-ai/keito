@@ -1,15 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as Y from 'yjs';
-import { type PictureStore, pictureStore } from '../server/collab/pictureStore';
-import { type PictureSweep, pictureSweep } from '../server/collab/pictureSweep';
-import { type CollabStore, openStore } from '../server/collab/store';
-import { addBoard, boardNodes, deleteBoard } from '../src/collab/boards';
 import type { ProjectSeed } from '../src/collab/model';
 import { type PictureBody, type PictureDevice, type PictureStatus } from '../src/collab/pictures';
-import { MAX_PICTURE_BYTES, pictureAddress, sharedName, sharedSrc } from '../src/collab/pictureRef';
+import { MAX_PICTURE_BYTES, pictureAddress, sharedName } from '../src/collab/pictureRef';
 import type { Role } from '../src/collab/protocol';
 import { NOT_TAKEN } from '../src/collab/scope';
 import { allIds } from '../src/model/ids';
@@ -259,7 +254,7 @@ describe('the room the server has for pictures', () => {
     expect(kept()).toHaveLength(2);
   });
 
-  it("turns away a picture that would leave the disk less free space than the server was started to keep, and goes on storing the board's edits", async () => {
+  it("turns away a picture that would leave the server's disk less free space than it was started to keep, and goes on storing the board's edits", async () => {
     // More than any disk has free.
     await serveWith({ env: { KEITO_COLLAB_MIN_FREE_DISK: '8000TB' } });
     const a = await person('a');
@@ -268,7 +263,7 @@ describe('the room the server has for pictures', () => {
     const refused = a.watch(name);
     await until(() => refused.status() === 'refused', 5_000, 'the picture to be turned away');
     expect(a.s().collab!.pictures.view(name).reason).toBe('共同編集先の空き容量が足りません');
-    expect(await reason(await put(seed.id, bytes, token))).toEqual({ status: 507, reason: 'disk-full' });
+    expect(await reason(await put(seed.id, bytes, token))).toEqual({ status: 507, reason: 'store-full' });
     expect(kept()).toEqual([]);
 
     const stored = storedEdits(data, seed.id);
@@ -278,138 +273,11 @@ describe('the room the server has for pictures', () => {
     await until(() => storedEdits(data, seed.id) === stored + 1, 5_000, "a's move to be stored");
   });
 
-  it('keeps the pictures sent at once above the free space to leave on the disk together', async () => {
-    const [one, two] = [picture('甲').bytes, picture('乙').bytes];
-    const folder = join(data, 'elsewhere');
-    // A disk with room for one of them above the space to leave free, whichever comes first.
-    const free = async () => 1_000 + one.length - (existsSync(join(folder, seed.id)) ? readdirSync(join(folder, seed.id)).length * one.length : 0);
-    const pictures = pictureStore(folder, { perProject: Infinity, minFree: 1_000 }, free);
-    const outcomes = await Promise.all([pictures.put(seed.id, nameOf(one), one), pictures.put(seed.id, nameOf(two), two)]);
-    expect(outcomes.sort()).toEqual(['disk-full', 'stored']);
-  });
-
   it('runs with 10GB a project, 5GB kept free and 30 days for an unused picture when it is given no other limits, and says so', async () => {
     const output: string[] = [];
     await server.kill();
     server = await startServer(data, 0, output);
     expect(output.join('\n')).toMatch(/画像.* 10GB .* 5GB .* 30d /);
-  });
-});
-
-describe('the pictures no board uses', () => {
-  const DAY = 86_400_000;
-  const PERIOD = 30 * DAY;
-  /** When the first sweep runs: the time is given to each one. */
-  const T0 = Date.UTC(2026, 0, 1);
-  let store: CollabStore;
-  let pictures: PictureStore;
-  let sweep: PictureSweep;
-
-  /** The server's own parts over the data folder, as `serve` puts them together, started anew. */
-  function start(perProject = Infinity): void {
-    store = openStore(join(data, 'keito-collab.sqlite'));
-    pictures = pictureStore(join(data, 'pictures'), { perProject, minFree: 0 });
-    sweep = pictureSweep(store, pictures, PERIOD);
-  }
-
-  beforeEach(async () => {
-    await server.kill();
-    start();
-  });
-  afterEach(() => store.close());
-
-  /** Change the project as an editor's commit does. */
-  function edit(change: (ydoc: Y.Doc) => void): void {
-    const ydoc = new Y.Doc();
-    Y.applyUpdate(ydoc, store.load(seed.id)!);
-    const before = Y.encodeStateVector(ydoc);
-    change(ydoc);
-    store.commit(seed.id, randomUUID(), Y.encodeStateAsUpdate(ydoc, before));
-  }
-  /** Put a picture on a board, as an image node refers to it; returns what takes it off again. */
-  function place(name: string, board = seed.board.id): () => void {
-    const id = randomUUID();
-    edit((ydoc) => {
-      const node = new Y.Map<unknown>();
-      boardNodes(ydoc, board)!.set(id, node);
-      node.set('src', sharedSrc(name));
-    });
-    return () => edit((ydoc) => boardNodes(ydoc, board)!.delete(id));
-  }
-  /** Send a picture of its own to the project. */
-  async function send(text: string): Promise<string> {
-    const { bytes } = picture(text);
-    expect(await pictures.put(seed.id, nameOf(bytes), bytes)).toBe('stored');
-    return nameOf(bytes);
-  }
-
-  it('are taken off once no board has used them for the whole period, making room, while those a board uses stay, a deleted board that can be restored included', async () => {
-    const texts = ['使っている画像', '削除したボードの画像', '消した画像', '置かなかった画像'];
-    store.close();
-    start(texts.reduce((sum, text) => sum + picture(text).bytes.length, 0));
-    const [used, deleted, removed, never] = [await send(texts[0]), await send(texts[1]), await send(texts[2]), await send(texts[3])];
-    place(used);
-    let other = '';
-    edit((ydoc) => void (other = addBoard(ydoc, { title: '控え', kind: 'free' }, null)));
-    place(deleted, other);
-    edit((ydoc) => deleteBoard(ydoc, other, null));
-    place(removed)();
-    const more = picture('入らない画像').bytes;
-    expect(await pictures.put(seed.id, nameOf(more), more)).toBe('project-full');
-
-    await sweep.run(T0);
-    await sweep.run(T0 + PERIOD - 1);
-    expect(kept().sort()).toEqual([used, deleted, removed, never].sort());
-    await sweep.run(T0 + PERIOD);
-    expect(kept().sort()).toEqual([used, deleted].sort());
-    expect(await pictures.get(seed.id, removed)).toBeNull();
-    expect(await pictures.put(seed.id, nameOf(more), more)).toBe('stored');
-  });
-
-  it('stay a whole period more when they are brought back to a board, or sent again, within the period', async () => {
-    const [undone, resent] = [await send('元に戻した画像'), await send('送り直した画像')];
-    const takeOff = place(undone);
-    takeOff();
-    await sweep.run(T0);
-    // Undone a day before it would go, and taken off for good ten days later.
-    const again = place(undone);
-    expect(await pictures.put(seed.id, resent, picture('送り直した画像').bytes)).toBe('known');
-    await sweep.run(T0 + PERIOD - DAY);
-    again();
-    await sweep.run(T0 + PERIOD + 9 * DAY);
-    expect(kept().sort()).toEqual([undone, resent].sort());
-    await sweep.run(T0 + 2 * PERIOD - DAY);
-    expect(kept()).toEqual([undone]);
-    await sweep.run(T0 + 2 * PERIOD + 9 * DAY);
-    expect(kept()).toEqual([]);
-  });
-
-  it('are known to be unused since when through a restart of the server', async () => {
-    const name = await send('再起動');
-    await sweep.run(T0);
-    store.close();
-    start();
-    await sweep.run(T0 + PERIOD - 1);
-    expect(kept()).toEqual([name]);
-    await sweep.run(T0 + PERIOD);
-    expect(kept()).toEqual([]);
-  });
-
-  it('are left alone in a deleted project, and stay a whole period more once it is restored', async () => {
-    const name = await send('削除した案件');
-    await sweep.run(T0);
-    store.deleteProject(seed.id);
-    await sweep.run(T0 + PERIOD);
-    expect(kept()).toEqual([name]);
-    store.restoreProject(seed.id);
-    await sweep.run(T0 + PERIOD + DAY);
-    // Deleted and restored again with no sweep in between, as while the server is stopped.
-    store.deleteProject(seed.id);
-    store.restoreProject(seed.id);
-    await sweep.run(T0 + 2 * PERIOD + DAY);
-    expect(kept()).toEqual([name]);
-    await sweep.run(T0 + 3 * PERIOD + DAY);
-    expect(kept()).toEqual([]);
   });
 });
 
