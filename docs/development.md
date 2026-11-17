@@ -109,7 +109,7 @@ npm run collab -- delete <案件 id>  # 共有案件を削除する（restore <�
 
   大きさは `10GB`・`500MB` のように KB・MB・GB・TB を付けて書きます（単位がなければバイト数）。期間は `30d`・`12h` のように d（日）・h（時間）・m（分）・s（秒）を付けて、1 秒以上で書きます。
 - サーバーは、案件の画像の合計を、案件の画像を最初に一覧したときから数えます。`pictures/` のファイルを手で変えるときは、サーバーを止めてから行います。
-- 画像の置き場所は `PictureEngine`（`server/collab/pictureStore.ts`）で差し替えます。案件の上限、1 枚ずつ保存する順番、使われない画像を消す規則は、`pictureStore` と `server/collab/pictureSweep.ts` がこの interface だけを使って決めます。ディスクに置く分は `server/collab/diskPictures.ts` で、一時ファイルへの書き込み・fsync・名前の変更と、ディスクの空きの読み取りを受け持ちます。どの置き場所を使うかは、`server/collab/cli.ts` の `serve` だけが決めます。
+- 画像の置き場所は `PictureEngine`（`server/collab/pictureStore.ts`）で差し替えます。案件の上限、1 枚ずつ保存する順番、使われない画像を消す規則は、`pictureStore` と `server/collab/pictureSweep.ts` がこの interface だけを使って決めます。ディスクに置く分は `server/collab/diskPictures.ts` で、一時ファイルへの書き込み・fsync・名前の変更と、ディスクの空きの読み取りを受け持ちます。どの置き場所を使うかは、`server/collab/cli.ts` の `serve` だけが決めます。置き場所が守ることは `test/pictureEngine.ts` の `everyEngine` にテストとして書いてあり、メモリに置くテスト用の実装（`memoryEngine`）とディスクの両方がこれを通ります。置き場所を足すときは、同じテストに通します。
 - 1 つのデータのフォルダは、1 台のサーバーだけで使います。複数のサーバーで同じ案件を扱う構成には対応していません。
 - サーバーは暗号化しない WebSocket（`ws://`）で待ち受けます。手元のネットワークの外から使うときは、手前の reverse proxy で TLS を終端し、`invite` の `--server` に `wss://` の URL を渡します。
 - 参加リンクには招待の token が入っています。アプリは token をブラウザに保存してアドレスから外し、次からは `#/s/<案件 id>` だけで開きます。サーバーには token の hash だけを保存し、ログにも出しません。

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,32 +12,18 @@ import { addBoard, boardNodes, deleteBoard } from '../src/collab/boards';
 import type { ProjectSeed } from '../src/collab/model';
 import { sharedSrc } from '../src/collab/pictureRef';
 import { seedData } from './collab';
+import { everyEngine, memoryEngine, nameOf, picture } from './pictureEngine';
 
-/** The bytes of a picture of its own (an SVG). */
-const picture = (text: string): Uint8Array => new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><text y="15">${text}</text></svg>`);
-const nameOf = (bytes: Uint8Array): string => `${createHash('sha256').update(bytes).digest('hex').slice(0, 24)}.svg`;
-
-/**
- * A place for the pictures' bytes that is no disk: they are held in memory, as a browser holds
- * IndexedDB. `capacity`: how many bytes it takes in all (null: it cannot tell how many more).
- */
-function memoryEngine(capacity: number | null = null): PictureEngine {
-  const kept = new Map<string, Map<string, Uint8Array>>();
-  const held = (): number => [...kept.values()].flatMap((pictures) => [...pictures.values()]).reduce((sum, bytes) => sum + bytes.length, 0);
-  return {
-    async keep(project, name, bytes) {
-      if (!kept.has(project)) kept.set(project, new Map());
-      kept.get(project)!.set(name, bytes);
-    },
-    read: async (project, name) => kept.get(project)?.get(name) ?? null,
-    async takeOff(project, name) {
-      kept.get(project)?.delete(name);
-    },
-    list: async (project) => new Map([...(kept.get(project) ?? [])].map(([name, bytes]) => [name, bytes.length])),
-    projects: async () => [...kept.keys()],
-    room: async () => (capacity === null ? null : capacity - held()),
-  };
+/** The folders the disk was given in a test, taken away after it. */
+const folders: string[] = [];
+function folder(): string {
+  folders.push(mkdtempSync(join(tmpdir(), 'keito-pictures-')));
+  return folders.at(-1)!;
 }
+afterEach(() => folders.splice(0).forEach((made) => rmSync(made, { recursive: true, force: true })));
+
+everyEngine('memory', () => memoryEngine());
+everyEngine('the disk', () => diskPictures(folder(), { minFree: 0 }));
 
 describe('the pictures a store keeps, whatever keeps their bytes', () => {
   it("keeps a picture once, and turns away one that would take its project's pictures over the limit", async () => {
@@ -265,39 +251,25 @@ describe('the pictures no board uses', () => {
 });
 
 describe('the disk as the place pictures are kept', () => {
-  let folder: string;
-  beforeEach(() => {
-    folder = mkdtempSync(join(tmpdir(), 'keito-pictures-'));
-  });
-  afterEach(() => rmSync(folder, { recursive: true, force: true }));
-
-  it('keeps a picture for an engine started anew over the same folder, lists it with its size, and takes it off', async () => {
+  it('still has a picture when it is started anew over the same folder, and takes what a crash left of one for no picture', async () => {
     const [one, two] = [picture('一枚目'), picture('二枚目のほうが長い')];
-    const disk = diskPictures(folder, { minFree: 0 });
+    const kept = folder();
+    const disk = diskPictures(kept, { minFree: 0 });
     await disk.keep('a', nameOf(one), one);
     await disk.keep('a', nameOf(two), two);
-    await disk.keep('b', nameOf(one), one);
+    // Nothing but the pictures: what one was written through is gone.
+    expect(readdirSync(join(kept, 'a')).sort()).toEqual([nameOf(one), nameOf(two)].sort());
+    writeFileSync(join(kept, 'a', `.${nameOf(one)}.left.part`), 'half');
 
-    const again = diskPictures(folder, { minFree: 0 });
+    const again = diskPictures(kept, { minFree: 0 });
     expect(new Uint8Array((await again.read('a', nameOf(two)))!)).toEqual(two);
     expect(await again.list('a')).toEqual(new Map([[nameOf(one), one.length], [nameOf(two), two.length]]));
-    expect((await again.projects()).sort()).toEqual(['a', 'b']);
-    // Nothing but the pictures: what one was written through is gone, and what a crash left of one is no picture.
-    expect(readdirSync(join(folder, 'a')).sort()).toEqual([nameOf(one), nameOf(two)].sort());
-    writeFileSync(join(folder, 'a', `.${nameOf(one)}.left.part`), 'half');
-    expect([...(await again.list('a')).keys()].sort()).toEqual([nameOf(one), nameOf(two)].sort());
-
-    await again.takeOff('a', nameOf(one));
-    await again.takeOff('a', nameOf(one));
-    expect(await again.read('a', nameOf(one))).toBeNull();
-    expect([...(await again.list('a')).keys()]).toEqual([nameOf(two)]);
-    expect(await again.list('never')).toEqual(new Map());
-    expect(await again.read('never', nameOf(one))).toBeNull();
+    expect(await again.projects()).toEqual(['a']);
   });
 
   it('has for room what its disk has free above what it is told to leave free', async () => {
-    expect(await diskPictures(folder, { minFree: 0 }).room()).toBeGreaterThan(0);
+    expect(await diskPictures(folder(), { minFree: 0 }).room()).toBeGreaterThan(0);
     // More than any disk has free.
-    expect(await diskPictures(folder, { minFree: 8000 * 1024 ** 4 }).room()).toBe(0);
+    expect(await diskPictures(folder(), { minFree: 8000 * 1024 ** 4 }).room()).toBe(0);
   });
 });
