@@ -9,6 +9,7 @@ import { FILLS, FillPreview, SHAPES, sizesFor } from '../icons';
 import { useBurst } from '../burst';
 import { Field, Section, Head, Colors, TextStyle } from './fields';
 import { DevicePanel } from './DevicePanel';
+import { TypedBox } from './TypedBox';
 
 export function NodePanel({ n }: { n: Node }) {
   const patch = (p: Partial<Node>, record = false) => useStore.getState().updateNode(n.id, p, record);
@@ -67,14 +68,14 @@ export function NodePanel({ n }: { n: Node }) {
       <div key={key} className={`legend-row${hidden ? ' off' : ''}`}>
         <input type="checkbox" checked={!hidden} title={hidden ? 'この行を凡例に出す' : 'この行を凡例から外す'} onChange={(e) => show(key, e.target.checked)} />
         <span className="swatch" style={swatch} />
-        <input value={n.names?.[key] ?? ''} placeholder={usual} disabled={!takes('fields')} onChange={(e) => rename(key, e.target.value)} />
+        {takes('rewriting') ? <input value={n.names?.[key] ?? ''} placeholder={usual} onChange={(e) => rename(key, e.target.value)} /> : <TypedBox at={{ id: n.id, field: 'row', row: key }} value={n.names?.[key] ?? ''} placeholder={usual} />}
       </div>
     );
     return (
       <>
         <Head title="凡例" id={n.id} />
         <Section title="見出し">
-          <Field freeText label="空にすると見出しを出しません" value={n.text} onChange={(v) => patch({ text: v })} />
+          <Field at={{ id: n.id, field: 'text' }} label="空にすると見出しを出しません" value={n.text} onChange={(v) => patch({ text: v })} />
         </Section>
         <Section title="線" note="チェックを外すと出しません">
           {rows.map((r) => row(r.color, r.hidden, r.usual, { background: r.color }))}
@@ -126,7 +127,7 @@ export function NodePanel({ n }: { n: Node }) {
           const img = await readImageFile(f);
           // Keep the width the picture already has on the board; follow the new proportions. Its name
           // stays where a name is not set whole (a shared board): a new one would have the whole change refused.
-          patch({ src: await storeImage(img.src), ...(takes('fields') ? { text: img.name } : {}), h: Math.round((n.w * img.h) / img.w) }, true);
+          patch({ src: await storeImage(img.src), ...(takes('rewriting') ? { text: img.name } : {}), h: Math.round((n.w * img.h) / img.w) }, true);
         } catch (e) {
           void tell(e instanceof Error ? e.message : String(e));
         }
@@ -137,7 +138,7 @@ export function NodePanel({ n }: { n: Node }) {
       <>
         <Head title="画像" id={n.id} />
         <Section title="画像">
-          <Field label="名前" value={n.text} onChange={(v) => patch({ text: v })} />
+          <Field at={{ id: n.id, field: 'text' }} label="名前" value={n.text} onChange={(v) => patch({ text: v })} />
           <p className="hint">
             {Math.round(n.w)} × {Math.round(n.h)} px{n.src.startsWith('asset:') ? ` ／ ${n.src.slice(6)}` : ''}
             <br />
@@ -146,7 +147,7 @@ export function NodePanel({ n }: { n: Node }) {
           <button onClick={replace}>画像を差し替え</button>
         </Section>
         <Section title="キャプション">
-          <Field label="テキスト（画像の上か下に出ます）" value={n.caption ?? ''} onChange={(v) => patch({ caption: v || undefined })} multiline />
+          <Field at={{ id: n.id, field: 'caption' }} label="テキスト（画像の上か下に出ます）" value={n.caption ?? ''} onChange={(v) => patch({ caption: v || undefined })} multiline />
           <div className="grid2">
             <label className="field">
               <span>位置</span>
@@ -176,7 +177,7 @@ export function NodePanel({ n }: { n: Node }) {
     <>
       <Head title={n.type === 'shape' ? '図形' : n.type === 'sticky' ? '付箋（コメント）' : n.type === 'frame' ? 'エリア枠' : 'テキスト'} id={n.id} />
       <Section title={n.type === 'sticky' ? 'コメント' : '内容'}>
-        <Field freeText label={n.type === 'frame' ? 'エリア名（機材リストの設置場所になります）' : 'テキスト'} value={n.text} onChange={(v) => patch({ text: v })} multiline={n.type !== 'frame'} />
+        <Field at={{ id: n.id, field: 'text' }} label={n.type === 'frame' ? 'エリア名（機材リストの設置場所になります）' : 'テキスト'} value={n.text} onChange={(v) => patch({ text: v })} multiline={n.type !== 'frame'} />
         {n.type === 'sticky' && (
           <>
             <PinNote n={n} />
