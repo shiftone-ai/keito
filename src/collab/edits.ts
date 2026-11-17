@@ -126,9 +126,9 @@ const lineChange = (from: Edge, to: Edge): Change | null => changeOf(from, to, L
 /**
  * What turns the things `from` holds into those `to` holds, or null when `to` does what a shared
  * board does not take: puts there one it cannot keep (`addable`), or changes one in a way it does
- * not take (`changed`).
+ * not take (`changed`). `moved`: as for runsBetween.
  */
-function itemsBetween<T extends { id: string }>(from: readonly T[], to: readonly T[], changed: (was: T, now: T) => Change | null, addable: (x: T) => boolean): Items<T> | null {
+function itemsBetween<T extends { id: string }>(from: readonly T[], to: readonly T[], changed: (was: T, now: T) => Change | null, addable: (x: T) => boolean, moved?: ReadonlySet<string>): Items<T> | null {
   const before = new Map(from.map((x) => [x.id, x]));
   const after = new Set(to.map((x) => x.id));
   const edit = noItems<T>();
@@ -146,7 +146,7 @@ function itemsBetween<T extends { id: string }>(from: readonly T[], to: readonly
   }
   for (const x of from) if (!after.has(x.id)) edit.remove.add(x.id);
   const ids = (list: readonly T[], kept: { has(id: string): boolean }): string[] => list.filter((x) => kept.has(x.id)).map((x) => x.id);
-  edit.moves = runsBetween(ids(from, after), ids(to, before));
+  edit.moves = runsBetween(ids(from, after), ids(to, before), moved);
   return edit;
 }
 
@@ -165,13 +165,14 @@ function listsBetween(from: Doc['listOrder'] = {}, to: Doc['listOrder'] = {}): M
  * The edit that turns `from` into `to`, two states of a shared board one after the other on screen;
  * null when `to` changes something a shared board does not take yet: anything but its nodes, its
  * lines and the orders of its lists (its settings …), a text typed by hand (a node's, a port's
- * name, a line's), or a node of a kind not shared.
+ * name, a line's), or a node of a kind not shared. `moved`: the nodes known to be the ones `to`
+ * puts elsewhere in the order they are drawn in (see runsBetween).
  */
-export function editBetween(from: Doc, to: Doc): BoardEdit | null {
+export function editBetween(from: Doc, to: Doc, moved?: ReadonlySet<string>): BoardEdit | null {
   const a = from as unknown as Record<string, unknown>;
   const b = to as unknown as Record<string, unknown>;
   for (const key of keysOf(a, b)) if (!EDITED.has(key) && !same(a[key], b[key])) return null;
-  const nodes = itemsBetween(from.nodes, to.nodes, nodeChange, addable);
+  const nodes = itemsBetween(from.nodes, to.nodes, nodeChange, addable, moved);
   const ports = nodes && portsBetween(from.nodes, to.nodes);
   const lines = ports && itemsBetween(from.edges, to.edges, lineChange, lineAddable);
   if (!nodes || !ports || !lines) return null;

@@ -162,6 +162,21 @@ describe('the order of a shared board', () => {
     expect(toYaml(c.s().doc)).toEqual(toYaml(a.s().doc));
   });
 
+  it('keeps both moves when one editor brings more than half of the nodes to the front and the other sends one of the rest to the back at once', async () => {
+    const a = await editor();
+    const b = await editor();
+    const first = seed.shape.id;
+    const [second, third, fourth, last] = [0, 1, 2, 3].map(() => a.add((t) => makeNode('rect', 80, 40, t)).id);
+    await until(() => !!b.node(last), 5_000, 'the nodes to reach the other editor');
+    expect(ids(b)).toEqual([first, second, third, fourth, last]);
+
+    a.restack([first, second, third], 'front');
+    b.restack([last], 'back');
+    await agree(a, b);
+
+    for (const x of [a, b]) expect(ids(x)).toEqual([last, fourth, first, second, third]);
+  });
+
   it("keeps a line connected to a port the other editor moves among the device's ports at once, the ports in one order on both boards and in the cable table, through a killed server", async () => {
     const a = await editor();
     const b = await editor();

@@ -268,9 +268,9 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
   return {
     edits: {
       takes,
-      edit(next, record) {
+      edit(next, record, moved) {
         if (!board || looking()) return host.refuse();
-        const edit = editBetween(host.get().doc, next);
+        const edit = editBetween(host.get().doc, next, moved);
         if (!edit) return host.refuse();
         if (isNoEdit(edit)) return;
         // Not made an operation of its own: that would be a step of its own to undo, where a board of

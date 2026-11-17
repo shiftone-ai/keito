@@ -1,15 +1,30 @@
 // What the others in a shared project are doing on the board on screen, drawn over it in their colours.
 import type { Peer } from '../collab/presence';
-import { nodeRect, pathD } from '../model/geometry';
+import { deviceTagRects } from '../model/badges';
+import { captionBox, nodeRect, pathD } from '../model/geometry';
 import { useStore } from '../model/store';
 import { UI_FONT, measure } from '../model/text';
-import type { Doc, Pt } from '../model/types';
+import type { Doc, Node, Pt } from '../model/types';
 import { mid } from './render';
 
 /** A name tag's type: as on screen at every zoom. */
 const TAG_FONT = 11;
 const TAG_PAD = 6;
-const TAG_H = 18;
+export const TAG_H = 18;
+const OUTLINE_OFFSET = 4;
+
+/**
+ * Where the name tag of a peer who picked `node` is drawn (its top left, at zoom `k`): over the top
+ * left corner of the outline drawn round the node, and over what is drawn above the node there (a
+ * device's address and power load, see deviceTagRects; a picture's caption), which stays to be read.
+ */
+export function tagAt(doc: Doc, node: Node, k: number): Pt {
+  const r = nodeRect(node);
+  const caption = captionBox(node);
+  const drawnAbove = [...(node.type === 'device' ? deviceTagRects(doc, node) : []), ...(caption ? [caption] : [])];
+  const top = Math.min(r.y - OUTLINE_OFFSET / k, ...drawnAbove.map((drawn) => drawn.y));
+  return { x: r.x - OUTLINE_OFFSET / k, y: top - (TAG_H + 2) / k };
+}
 
 /** A name tag in the peer's colour, its top left at `at` (sizes as on screen, at zoom `k`); `pencil` while they edit. */
 function Tag({ at, peer, k, pencil }: { at: Pt; peer: Peer; k: number; pencil?: boolean }) {
@@ -36,14 +51,13 @@ export function PeerMarks({ doc, routes, k }: { doc: Doc; routes: Map<string, Pt
   const here = peers.filter((p) => p.board === doc.id);
   if (!here.length) return null;
   const nodes = new Map(doc.nodes.map((n) => [n.id, n]));
-  const pad = 4 / k;
+  const pad = OUTLINE_OFFSET / k;
   return (
     <g pointerEvents="none">
       {here.map((peer) => {
         const marked = [...new Set([...peer.selection, ...peer.editing])];
         const edited = peer.editing.map((id) => nodes.get(id)).find((n) => !!n);
         const tagged = edited ?? peer.selection.map((id) => nodes.get(id)).find((n) => !!n);
-        const tagAt = tagged && nodeRect(tagged);
         return (
           <g key={peer.id} data-peer={peer.name}>
             {marked.map((id) => {
@@ -59,7 +73,7 @@ export function PeerMarks({ doc, routes, k }: { doc: Doc; routes: Map<string, Pt
             {peer.moving.map((m) => (
               <path key={`moving-${m.id}`} className="peer-moving" d={`M${m.x} ${m.y}h${m.w}v${m.h}h${-m.w}z`} fill={peer.color} fillOpacity={0.08} stroke={peer.color} strokeWidth={1.5 / k} strokeDasharray={`${6 / k} ${4 / k}`} />
             ))}
-            {tagAt && <Tag at={{ x: tagAt.x - pad, y: tagAt.y - pad - (TAG_H + 2) / k }} peer={peer} k={k} pencil={!!edited} />}
+            {tagged && <Tag at={tagAt(doc, tagged, k)} peer={peer} k={k} pencil={!!edited} />}
             {peer.pointer && (
               <g className="peer-pointer">
                 <path transform={`translate(${peer.pointer.x},${peer.pointer.y}) scale(${1 / k})`} d="M0 0l0 15 4-3.6 2.6 6 2.6-1.1-2.6-5.9 5.4-.4z" fill={peer.color} stroke="#fff" strokeWidth={1.2} strokeLinejoin="round" />

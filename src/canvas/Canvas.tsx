@@ -1110,7 +1110,7 @@ export function Canvas() {
         <button onClick={() => zoomBy(1.25)} title="拡大">＋</button>
         <button onClick={() => st().fit()} title={shortcuts('全体表示 (⇧1)')}>全体</button>
       </div>
-      {collab && <Participants collab={collab} />}
+      {collab && collab.link !== 'refused' && <Participants collab={collab} />}
     </div>
   );
 }
