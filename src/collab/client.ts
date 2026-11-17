@@ -354,7 +354,9 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
      */
     typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
       const parts = editing() ? tracked(board) : null;
-      const session = parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), history: parts.history, joins, editing });
+      // Not through `draw`: unmarked by a board (see tracked), a change is in no board's history.
+      const outsideHistory = (write: () => void): void => ydoc.transact(write, drawing);
+      const session = parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), outsideHistory, history: parts.history, joins, editing });
       return session && names.typing(session);
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */

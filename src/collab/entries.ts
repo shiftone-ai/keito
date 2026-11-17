@@ -20,6 +20,12 @@ export const isBoolean: Check = (v) => typeof v === 'boolean';
 /** A text the project holds, as typed (a plain string from an older writer is read as it is). */
 export const textOf = (v: unknown, fallback = ''): string => (v instanceof Y.Text ? v.toString() : typeof v === 'string' ? v : fallback);
 
+/** Where a text typed by hand is held, there yet or not: under `key` of `holder`. Typing into it is typing.ts's. */
+export interface TextPlace {
+  holder: YMap;
+  key: string;
+}
+
 /** The place of an entry in the order of its map (see order.ts): lower comes first (further back, for nodes). */
 const orderOf = (entry: unknown): number => {
   const order = entry instanceof Y.Map ? entry.get('order') : undefined;

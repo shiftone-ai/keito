@@ -94,9 +94,6 @@ async function onTwoBoards(browser: Browser) {
 
 test('two browsers keep a PC placed on two boards as one: an IP given on one board is on the other board too, and deleting it from all boards says what goes and one undo brings it back', async ({ browser }) => {
   const { a, b } = await onTwoBoards(browser);
-  // The name is typed on the board: the inspector's field, written whole, is not taken on a shared board yet.
-  await expect(field(a.page, '名称', 'textarea')).toBeDisabled();
-
   await clickOn(b.page, device(b.page, 'PC'));
   await typeIp(b.page, '192.168.0.10');
   await expect(field(a.page, 'IP アドレス')).toHaveValue('192.168.0.10');

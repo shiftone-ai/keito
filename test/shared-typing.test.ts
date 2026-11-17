@@ -2,11 +2,11 @@ import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSeed } from '../src/collab/model';
 import { allIds } from '../src/model/ids';
-import { makeEdge, makeNode } from '../src/model/presets';
+import { makeDevice, makeEdge, makeImage, makeLegend, makeNode, presetOf } from '../src/model/presets';
 import type { TextAt, TextSession } from '../src/model/target';
-import type { Node } from '../src/model/types';
+import type { DeviceNode, ImageNode, LegendNode, Node } from '../src/model/types';
 import { type TextField, type TextRange, bindField } from '../src/ui/typing';
-import { type RunningServer, seedData, startServer, until } from './collab';
+import { type RunningServer, seedData, startServer, storedEdits, until } from './collab';
 import { blank } from './helpers';
 import { stubPage, versionedDisk } from './page';
 
@@ -48,15 +48,19 @@ async function editor() {
 type Editor = Awaited<ReturnType<typeof editor>>;
 
 /**
- * Open a node's text to type into, as the canvas's editor does, in a field held in memory: what it
- * shows and what of it is selected. Typing changes the field, then tells the binding, as the
- * browser's input events do; a conversion (IME) changes the field while composing.
+ * Open a text of the board to type into (a node's own by its id), as the canvas's editor and the
+ * inspector's fields do, in a field held in memory: what it shows and what of it is selected. Typing
+ * changes the field, then tells the binding, as the browser's input events do; a conversion (IME)
+ * changes the field while composing. `joins`: the typing is part of the editor's last step;
+ * `oneLine`: the field shows the text on one line.
  */
-function typeInto(e: Editor, id: string, joins = false, of: TextAt['field'] = 'text') {
-  const session: TextSession = e.s().typeInto({ id, field: of }, joins)!;
-  let text = session.value();
+function typeInto(e: Editor, at: string | TextAt, { joins = false, oneLine = false } = {}) {
+  const session: TextSession = e.s().typeInto(typeof at === 'string' ? { id: at, field: 'text' } : at, joins)!;
+  /** What the field shows of a text: `oneLine`, as an input does, a space for each line break. */
+  const shows = (t: string): string => (oneLine ? t.replace(/\n/g, ' ') : t);
+  let text = shows(session.value());
   let range: TextRange = [text.length, text.length];
-  const field: TextField = { read: () => ({ text, range }), write: (t, r) => ((text = t), (range = r)) };
+  const field: TextField = { read: () => ({ text, range }), write: (t, r) => ((text = shows(t)), (range = r)) };
   const box = { gone: false };
   const typing = bindField(field, session, { gone: () => (box.gone = true) });
   const sorted = (): [number, number] => [Math.min(...range), Math.max(...range)];
@@ -226,7 +230,7 @@ describe('typing into a shared board', () => {
         made = makeNode('text', 300, 200, allIds(d), '');
         return { ...d, nodes: [...d.nodes, made] };
       });
-      return { id: made!.id, typing: typeInto(a, made!.id, true) };
+      return { id: made!.id, typing: typeInto(a, made!.id, { joins: true }) };
     };
 
     const kept = put();
@@ -259,8 +263,8 @@ describe('typing into a shared board', () => {
     const edge = (e: Editor) => e.s().doc.edges.find((x) => x.id === line);
     await until(() => !!edge(b), 5_000, 'the line to reach B');
 
-    const la = typeInto(a, line, false, 'label');
-    const lb = typeInto(b, line, false, 'label');
+    const la = typeInto(a, { id: line, field: 'label' });
+    const lb = typeInto(b, { id: line, field: 'label' });
     la.type('送る');
     await until(() => lb.shows() === '送る', 5_000, 'A’s label to reach B');
     lb.select(0);
@@ -269,12 +273,158 @@ describe('typing into a shared board', () => {
     la.type('！');
     await until(() => edge(b)?.label === '先に送る！', 5_000, 'both labels on B’s line');
 
-    const note = typeInto(b, line, false, 'note');
+    const note = typeInto(b, { id: line, field: 'note' });
     note.type('予備あり');
     await until(() => edge(a)?.note === '予備あり', 5_000, 'B’s note to reach A');
     for (const t of [la, lb, note]) t.session.end(true);
     await a.stored();
     await b.stored();
     expect(edge(a)).toMatchObject({ label: '先に送る！', note: '予備あり' });
+  });
+});
+
+/** Put `made` on the board `e` shows, in one step, and wait for the other editors to have it. */
+async function putNode<T extends Node>(e: Editor, made: (taken: Set<string>) => T, others: Editor[]): Promise<T> {
+  let node!: T;
+  e.s().mutate((d) => {
+    node = made(allIds(d));
+    return { ...d, nodes: [...d.nodes, node] };
+  });
+  for (const other of others) await until(() => !!other.node(node.id), 5_000, 'the node to reach the other editor');
+  return node;
+}
+
+/** Take the server away, so that no editor hears of another's edits, until it is started again on the same port. */
+async function cutOff(...editors: Editor[]): Promise<() => Promise<void>> {
+  const { port } = server;
+  await server.kill();
+  await until(() => editors.every((e) => e.s().collab?.link === 'offline'), 5_000, 'the server to be missed');
+  return async () => void (server = await startServer(data, port));
+}
+
+describe('typing into the texts the inspector shows of a shared board', () => {
+  it('types into a device’s note and the name of one of its ports, each editor’s letters kept, and undo takes back only the editor’s own', async () => {
+    const a = await editor();
+    const b = await editor();
+    const pc = await putNode(a, (taken) => makeDevice(presetOf('pc')!, 300, 0, taken), [b]);
+    const port = pc.ports[0];
+    const device = (e: Editor) => e.node(pc.id) as DeviceNode | undefined;
+    const portName = (e: Editor) => device(e)?.ports.find((p) => p.id === port.id)?.name;
+
+    const note = typeInto(b, { id: pc.id, field: 'note' });
+    note.type('予備機');
+    note.session.end(true);
+    const mine = typeInto(a, { id: pc.id, field: 'port', port: port.id });
+    const theirs = typeInto(b, { id: pc.id, field: 'port', port: port.id });
+    mine.select(0);
+    mine.type('本線 ');
+    theirs.type(' 2');
+    await until(() => mine.shows() === `本線 ${port.name} 2` && theirs.shows() === mine.shows(), 5_000, 'both names of the port to be the same');
+    for (const t of [mine, theirs]) t.session.end(true);
+    for (const e of [a, b]) await until(() => device(e)?.note === '予備機' && portName(e) === `本線 ${port.name} 2`, 5_000, 'the note and the port’s name on each editor');
+
+    a.s().undo();
+    await until(() => portName(b) === `${port.name} 2`, 5_000, 'A’s undo of the port’s name to reach B');
+    expect(device(b)?.note).toBe('予備機');
+  });
+
+  it('keeps a line break of a text typed into in a field of one line, where a space stands for it, through what is typed beside it there and by another editor', async () => {
+    const a = await editor();
+    const b = await editor();
+    const board = typeInto(a, shape());
+    board.type('\n下');
+    await until(() => textOf(b) === '図形\n下', 5_000, 'the line break to reach B');
+
+    const line = typeInto(b, shape(), { oneLine: true });
+    expect(line.shows()).toBe('図形 下');
+    line.select(0);
+    line.type('X');
+    await until(() => board.shows() === 'X図形\n下', 5_000, 'B’s letter in front of the line break');
+    board.type('Y');
+    await until(() => line.shows() === 'X図形 下Y', 5_000, 'A’s letter in B’s field');
+    line.select(line.shows().length);
+    line.type('Z');
+    await until(() => board.shows() === 'X図形\n下YZ', 5_000, 'B’s letter after A’s, the line break kept');
+    expect(textOf(b)).toBe('X図形\n下YZ');
+  });
+
+  it('keeps the letters of two editors who each begin a picture’s caption and leave it before hearing of the other', async () => {
+    const a = await editor();
+    const b = await editor();
+    const picture = await putNode(a, (taken) => makeImage(taken, { src: `shared:${'0123456789ab'.repeat(2)}.png`, w: 200, h: 100, name: '会場' }, 300, 300) as ImageNode, [b]);
+    const captionOf = (e: Editor) => (e.node(picture.id) as ImageNode | undefined)?.caption;
+    await a.stored();
+
+    const backOn = await cutOff(a, b);
+    for (const [e, letters] of [[a, '1F'], [b, '会場図']] as const) {
+      const caption = typeInto(e, { id: picture.id, field: 'caption' });
+      caption.type(letters);
+      caption.session.end(true);
+    }
+    await backOn();
+    await until(() => !!captionOf(a) && captionOf(a) === captionOf(b), 15_000, 'both editors to show one caption');
+    expect(['1F会場図', '会場図1F']).toContain(captionOf(a));
+  });
+
+  it('puts the name a legend gives a row there with the first thing typed, not by opening it; two who begin it at once keep both their letters as they type on, and each undoes its own', async () => {
+    const a = await editor();
+    const b = await editor();
+    const legend = await putNode(a, (taken) => makeLegend(taken, 600, 0) as LegendNode, [b]);
+    const at: TextAt = { id: legend.id, field: 'row', row: '#2563eb' };
+    const names = (e: Editor) => (e.node(legend.id) as LegendNode | undefined)?.names;
+    const name = (e: Editor) => names(e)?.[at.row];
+    await a.stored();
+    const stored = storedEdits(data, seed.id);
+
+    const mine = typeInto(a, at);
+    const theirs = typeInto(b, at);
+    expect(mine.shows()).toBe('');
+    expect(a.s().collab?.pending).toBe(0);
+    expect(storedEdits(data, seed.id)).toBe(stored);
+
+    const backOn = await cutOff(a, b);
+    mine.type('映像');
+    theirs.type('本線');
+    await backOn();
+    await until(() => !!name(a) && name(a) === name(b) && mine.shows() === name(a) && theirs.shows() === name(a), 15_000, 'both editors and both fields to show one name');
+    expect(['映像本線', '本線映像']).toContain(name(a));
+    expect([mine.gone, theirs.gone]).toEqual([false, false]);
+    mine.select(mine.shows().length);
+    mine.type('！');
+    await until(() => theirs.shows() === mine.shows() && name(b)?.endsWith('！') === true, 5_000, 'A’s next letter to reach B');
+    for (const t of [mine, theirs]) t.session.end(true);
+
+    a.s().undo();
+    await until(() => name(a) === '本線' && name(b) === '本線', 5_000, 'A’s undo to leave B’s letters');
+    b.s().undo();
+    // A name emptied is no name: the row goes by its usual one again.
+    await until(() => names(a) === undefined && names(b) === undefined, 5_000, 'the name to be empty again');
+    await a.stored();
+    await b.stored();
+  });
+
+  it('ends typing into a port’s name when another editor takes the port off, and into a text that is not of the board, without bringing anything back', async () => {
+    const a = await editor();
+    const b = await editor();
+    const pc = await putNode(a, (taken) => makeDevice(presetOf('pc')!, 300, 0, taken), [b]);
+    const port = pc.ports[0];
+    const ports = (e: Editor) => (e.node(pc.id) as DeviceNode | undefined)?.ports.map((p) => p.id);
+    const typing = typeInto(a, { id: pc.id, field: 'port', port: port.id });
+    typing.type('消える');
+    await until(() => (b.node(pc.id) as DeviceNode | undefined)?.ports[0].name === `${port.name}消える`, 5_000, 'A’s typing to reach B');
+    b.s().updateNode(pc.id, { ports: pc.ports.slice(1) });
+    await until(() => typing.gone, 5_000, 'A’s typing to end');
+    typing.type('まだ');
+    typing.session.end(true);
+    await a.stored();
+    await b.stored();
+    expect(ports(a)).toEqual(pc.ports.slice(1).map((p) => p.id));
+    expect(ports(b)).toEqual(ports(a));
+
+    // No text to type into: a port the device does not have, a caption of what is no picture, a row of what is no legend.
+    const s = a.s();
+    expect(s.typeInto({ id: pc.id, field: 'port', port: port.id }, false)).toBeNull();
+    expect(s.typeInto({ id: pc.id, field: 'caption' }, false)).toBeNull();
+    expect(s.typeInto({ id: shape(), field: 'row', row: '#2563eb' }, false)).toBeNull();
   });
 });

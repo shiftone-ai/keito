@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import type { Port } from '../model/types';
 import type { Items } from './edits';
-import { type YMap, readInOrder, setEach, textOf, writeItems } from './entries';
+import { type TextPlace, type YMap, readInOrder, setEach, textOf, writeItems } from './entries';
 
 /**
  * A device's ports as the project holds them (see nodes.ts for the device):
@@ -17,6 +17,13 @@ import { type YMap, readInOrder, setEach, textOf, writeItems } from './entries';
 export function readPorts(node: YMap): Port[] {
   const ports = node.get('ports');
   return ports instanceof Y.Map ? readInOrder(ports as YMap, (id, p) => ({ id, name: textOf(p.get('name')), side: p.get('side'), signal: p.get('signal') }) as Port) : [];
+}
+
+/** Where a device holds the name of one of its ports; null for a port it does not have. */
+export function portNamePlace(node: YMap, id: string): TextPlace | null {
+  const ports = node.get('ports');
+  const port = ports instanceof Y.Map ? ports.get(id) : undefined;
+  return port instanceof Y.Map ? { holder: port as YMap, key: 'name' } : null;
 }
 
 function putPort(ports: YMap, p: Port, order: number): void {

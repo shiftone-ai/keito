@@ -70,10 +70,10 @@ export function EdgePanel({ e }: { e: Edge }) {
               ))}
           </>
         )}
-        <Field freeText wrap label="備考" value={e.note} onChange={(v) => patch({ note: v })} />
+        <Field at={{ id: e.id, field: 'note' }} wrap label="備考" value={e.note} onChange={(v) => patch({ note: v })} />
       </Section>
       <Section title="ラベル">
-        <Field freeText wrap label="文（改行できます）" value={e.label} onChange={(v) => patch({ label: v })} />
+        <Field at={{ id: e.id, field: 'label' }} wrap label="文（改行できます）" value={e.label} onChange={(v) => patch({ label: v })} />
         {cable && (
           <>
             <span className="group-label">ラベルに出すもの（品名・規格は書いてあれば出ます）</span>

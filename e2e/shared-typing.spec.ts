@@ -50,7 +50,7 @@ async function reopen(page: Page): Promise<void> {
 const editor = (page: Page) => page.locator('.text-editor');
 /** What the editor shows, line breaks and all. */
 const shown = (page: Page) => editor(page).evaluate((el) => (el as HTMLElement).innerText.replace(/\n$/, ''));
-/** The shape's text as the inspector shows it (to look at only, on a shared board). */
+/** The shape's text as the inspector shows it. */
 const textField = (page: Page) => page.locator('.inspector label.field', { hasText: 'テキスト' }).locator('textarea');
 async function press(page: Page, key: string, times = 1): Promise<void> {
   for (let i = 0; i < times; i++) await page.keyboard.press(key);

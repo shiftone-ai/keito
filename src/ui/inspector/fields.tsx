@@ -5,25 +5,27 @@ import { PRESETS, SOFTWARE } from '../../model/presets';
 import { kindOf } from '../../model/kinds';
 import { COLOR_KEYS, PALETTE, STICKY, allSignals, groupSignals } from '../../model/signals';
 import { useStore, useTakes } from '../../model/store';
+import type { TextAt } from '../../model/target';
 import { type Edge, type Node } from '../../model/types';
 import { sizesFor } from '../icons';
 import { textHeightFor, textWeight } from '../../canvas/render';
 import { useShallow } from 'zustand/react/shallow';
 import { useFieldBurst } from '../burst';
 import { composing } from '../keys';
+import { TypedBox } from './TypedBox';
 
 /**
  * Text input that records one undo step per editing burst instead of per keystroke (see
- * useFieldBurst). `freeText`: a name or a note, which a shared board does not take typing into yet
- * (there it would be replaced whole, losing what someone else typed into it meanwhile).
+ * useFieldBurst). `at`: the text of the board the field holds, where that is one typed by hand (a
+ * name, a note): a board that does not take it written whole has it typed into as it is typed (see
+ * TypedBox), which keeps what someone else types into it meanwhile.
  */
-export function Field({ label, value, onChange, multiline, wrap, type = 'text', placeholder, onPasteText, list, freeText }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; wrap?: boolean; type?: string; placeholder?: string; onPasteText?: (text: string) => boolean; list?: string; freeText?: boolean }) {
+export function Field({ label, value, onChange, multiline, wrap, type = 'text', placeholder, onPasteText, list, at }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; wrap?: boolean; type?: string; placeholder?: string; onPasteText?: (text: string) => boolean; list?: string; at?: TextAt }) {
   const burst = useFieldBurst();
   const takes = useTakes();
   const props = {
     value,
     placeholder,
-    disabled: !!freeText && !takes('fields'),
     // Lets a field hand pasted text to another one (a URL pasted into the model field, say).
     onPaste: (e: { clipboardData: DataTransfer; preventDefault: () => void }) => {
       if (onPasteText?.(e.clipboardData.getData('text/plain'))) e.preventDefault();
@@ -42,7 +44,15 @@ export function Field({ label, value, onChange, multiline, wrap, type = 'text', 
     <label className="field">
       <span>{label}</span>
       {/* `wrap`: a box that grows with its text, so a long note is all in view and selecting in it never scrolls the field. */}
-      {wrap ? <textarea className="wrap" rows={1} {...props} /> : multiline ? <textarea rows={4} {...props} /> : <input type={type} list={list} {...props} />}
+      {at && !takes('rewriting') ? (
+        <TypedBox at={at} value={value} lines={wrap ? 'grow' : multiline ? 'several' : 'one'} placeholder={placeholder} />
+      ) : wrap ? (
+        <textarea className="wrap" rows={1} {...props} />
+      ) : multiline ? (
+        <textarea rows={4} {...props} />
+      ) : (
+        <input type={type} list={list} {...props} />
+      )}
     </label>
   );
 }
@@ -254,14 +264,14 @@ export function SignalHowTo({ port }: { port?: boolean }) {
   );
 }
 
-/** A port's name: typed by hand, as a free-text Field. */
-export function PortName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** A port's name: typed by hand, as a Field of a text of the board (`at`). */
+export function PortName({ value, onChange, at }: { value: string; onChange: (v: string) => void; at: TextAt }) {
   const burst = useFieldBurst();
   const takes = useTakes();
+  if (!takes('rewriting')) return <TypedBox at={at} value={value} />;
   return (
     <input
       value={value}
-      disabled={!takes('fields')}
       onFocus={burst.begin}
       onBlur={burst.end}
       onKeyDown={(e) => {

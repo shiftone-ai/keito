@@ -1,8 +1,9 @@
 import * as Y from 'yjs';
+import type { TextAt } from '../model/target';
 import type { Edge, EdgeEnd, Pt } from '../model/types';
 import type { Change, Items } from './edits';
-import { type Check, type YMap, isBoolean, isNumber, isString, oneOf, readInOrder, setEach, textOf, writeItems } from './entries';
-import { LINE_ATTRIBUTES, type LineAttribute } from './scope';
+import { type Check, type TextPlace, type YMap, isBoolean, isNumber, isString, oneOf, readInOrder, setEach, textOf, writeItems } from './entries';
+import { LINE_ATTRIBUTES, LINE_TEXTS, type LineAttribute } from './scope';
 
 /**
  * The lines of a shared board as the project holds them (see model.ts for the rest of the project):
@@ -71,6 +72,11 @@ function lineOf(id: string, line: YMap): Edge | null {
   }
   return REQUIRED.every((key) => key in out) ? (out as unknown as Edge) : null;
 }
+
+const isLineText = oneOf(LINE_TEXTS);
+
+/** Where a line holds a text typed by hand (see TextAt): its label or its note; null for any other. */
+export const lineTextPlace = (line: YMap, at: TextAt): TextPlace | null => (isLineText(at.field) ? { holder: line, key: at.field } : null);
 
 /** A board's lines as the project holds them (those not whole left out), in the order they were put there. */
 export const readLines = (lines: YMap): Edge[] => readInOrder(lines, lineOf);

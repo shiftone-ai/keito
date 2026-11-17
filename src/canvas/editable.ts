@@ -1,5 +1,6 @@
 import type { TextSession } from '../model/target';
 import { type TextField, type Typing, bindField } from '../ui/typing';
+import { hearTyping } from '../ui/typingEvents';
 
 /** Whether `br` ends an editable: the last thing in it, there only so that an empty last line shows. */
 function closing(el: HTMLElement, br: Node): boolean {
@@ -54,9 +55,8 @@ export function editableField(el: HTMLElement): TextField {
 }
 
 /**
- * Keep an editable typed into the same as a shared text (see bindField). Line breaks, pastes and
- * drops go in as plain text (`oneLine`: line breaks as spaces); undo and redo are the session's,
- * since the browser's own knows nothing of what others typed.
+ * Keep an editable typed into the same as a shared text (see bindField, hearTyping). Line breaks,
+ * pastes and drops go in as plain text (`oneLine`: line breaks as spaces).
  */
 export function typeIntoEditable(el: HTMLElement, session: TextSession, options: { oneLine: boolean; typed?(): void; gone?(): void }): Typing {
   const typing = bindField(editableField(el), session, options);
@@ -68,35 +68,17 @@ export function typeIntoEditable(el: HTMLElement, session: TextSession, options:
     if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
       e.preventDefault();
       typing.insert(plain('\n'));
-    } else if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
-      e.preventDefault();
-      if (e.inputType === 'historyUndo') typing.undo();
-      else typing.redo();
     } else if (e.inputType === 'insertFromDrop' || e.inputType === 'deleteByDrag' || e.inputType.startsWith('format')) e.preventDefault();
   };
   const paste = (e: ClipboardEvent): void => {
     e.preventDefault();
     typing.insert(plain(e.clipboardData?.getData('text/plain') ?? ''));
   };
-  // The browser's undo would not be asked for by the keys once it has nothing of its own to undo.
-  const keys = (e: KeyboardEvent): void => {
-    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
-    // With the IME on, the letter comes as "Process" (keyCode 229), as on the board (see App).
-    const key = e.keyCode === 229 && /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
-    if (key !== 'z' && key !== 'y') return;
-    e.preventDefault();
-    if (key === 'y' || e.shiftKey) typing.redo();
-    else typing.undo();
-  };
-  const input = (e: Event): void => typing.input((e as InputEvent).isComposing);
   const listening = new AbortController();
   const { signal } = listening;
   el.addEventListener('beforeinput', before, { signal });
   el.addEventListener('paste', paste, { signal });
-  el.addEventListener('keydown', keys, { signal });
-  el.addEventListener('input', input, { signal });
-  el.addEventListener('compositionstart', typing.compositionStart, { signal });
-  el.addEventListener('compositionend', typing.compositionEnd, { signal });
+  hearTyping(el, typing, signal);
   return {
     ...typing,
     close() {
