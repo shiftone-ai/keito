@@ -103,6 +103,7 @@ export function openStore(file: string) {
     unused: db.prepare('SELECT name, found_at FROM unused_pictures WHERE project = ?'),
     markUnused: db.prepare('INSERT OR IGNORE INTO unused_pictures (project, name, found_at) VALUES (?, ?, ?)'),
     unmarkUnused: db.prepare('DELETE FROM unused_pictures WHERE project = ? AND name = ?'),
+    unmarkAllUnused: db.prepare('DELETE FROM unused_pictures WHERE project = ?'),
   };
 
   return {
@@ -166,9 +167,16 @@ export function openStore(file: string) {
       return sql.markDeleted.run(now(), id).changes > 0;
     },
 
-    /** Bring a deleted project back as it was when deleted. False when there is no such deleted project. */
+    /**
+     * Bring a deleted project back as it was when deleted, its pictures unused anew from now (see
+     * pictureSweep.ts). False when there is no such deleted project.
+     */
     restoreProject(id: string): boolean {
-      return sql.unmarkDeleted.run(id).changes > 0;
+      return inTransaction(() => {
+        if (!sql.unmarkDeleted.run(id).changes) return false;
+        sql.unmarkAllUnused.run(id);
+        return true;
+      });
     },
 
     /** The project's Yjs state as stored, or null for a project never initialized. */

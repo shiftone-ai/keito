@@ -41,7 +41,7 @@ function usedPictures(state: Uint8Array): Set<string> {
  * it so, kept in the store (it holds through a restart); found in use again, or put again, it is
  * unused anew from the sweep that next finds it so. Until then it stays, for the undo of whoever
  * took it off. The pictures of a deleted project stay as they are, for its restore, and are unused
- * anew from then.
+ * anew from then (see restoreProject in store.ts).
  */
 export function pictureSweep(store: CollabStore, pictures: PictureStore, keepMs: number) {
   // Unmarked as it is put, kept before or not: its node may reach the project only after it, and
@@ -53,8 +53,9 @@ export function pictureSweep(store: CollabStore, pictures: PictureStore, keepMs:
    * marked, those in use again unmarked. Returns those unused for the whole period, unmarked to go.
    */
   function markUnused(project: string, names: string[], now: number): string[] {
+    if (store.isDeleted(project)) return [];
     const marks = store.unusedPictures(project);
-    const state = names.length && !store.isDeleted(project) ? store.load(project) : null;
+    const state = names.length ? store.load(project) : null;
     const used = state && usedPictures(state);
     const unused = used ? names.filter((name) => !used.has(name)) : [];
     const due = (name: string): boolean => now - (marks.get(name) ?? now) >= keepMs;

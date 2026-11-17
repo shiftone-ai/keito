@@ -400,11 +400,15 @@ describe('the pictures no board uses', () => {
     await sweep.run(T0);
     store.deleteProject(seed.id);
     await sweep.run(T0 + PERIOD);
+    expect(kept()).toEqual([name]);
     store.restoreProject(seed.id);
     await sweep.run(T0 + PERIOD + DAY);
-    await sweep.run(T0 + 2 * PERIOD);
-    expect(kept()).toEqual([name]);
+    // Deleted and restored again with no sweep in between, as while the server is stopped.
+    store.deleteProject(seed.id);
+    store.restoreProject(seed.id);
     await sweep.run(T0 + 2 * PERIOD + DAY);
+    expect(kept()).toEqual([name]);
+    await sweep.run(T0 + 3 * PERIOD + DAY);
     expect(kept()).toEqual([]);
   });
 });
