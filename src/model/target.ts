@@ -44,8 +44,11 @@ export interface Target {
 export interface Edits {
   /** Whether it takes an edit of this kind (a tool armed, text typed in, copies made …). It tells the user nothing (see Target.refusal). */
   takes(what: EditKind): boolean;
-  /** An edit of the board (setDoc); `record` makes it an operation of its own. */
-  edit(next: Doc, record: boolean): void;
+  /**
+   * An edit of the board (setDoc); `record` makes it an operation of its own. `moved`: the nodes
+   * known to be the ones it puts elsewhere in the order they are drawn in.
+   */
+  edit(next: Doc, record: boolean, moved?: ReadonlySet<string>): void;
   /** An operation begins on the board as it is now (checkpoint). */
   begin(): void;
   /** The operation under way has ended. */

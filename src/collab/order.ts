@@ -26,16 +26,21 @@ export function inOrder(places: ReadonlyMap<string, number>): string[] {
 }
 
 /**
- * Which things of `to` keep their places from `from`: the most of them that stand in the same order
- * in both. Of as many, those nearer the middle of `to`: [A, B, C] → [A, C, B] is B brought to the
- * front as much as C put behind it, and the thing at an end is the one moved to it (restack moves
- * the nodes picked to an end). Then those later in `to`, so that a thing moved goes before the
- * others, away from where things are added.
+ * Which things of `to` keep their places from `from`: all of them when `to` keeps `from`'s order.
+ * Else none of `moved`, and of the others (the two orders without those) the most that stand in
+ * the same order in both. Of as many, those nearer the middle of `to`: [A, B, C] → [A, C, B] is B
+ * brought to the front as much as C put behind it, and the thing at an end is taken as the one
+ * moved to it. Then those later in `to`, so that a thing moved goes before the others, away from
+ * where things are added.
  */
-function staying(from: readonly string[], to: readonly string[]): Set<string> {
+function staying(from: readonly string[], to: readonly string[], moved?: ReadonlySet<string>): Set<string> {
   const at = new Map(from.map((id, i) => [id, i]));
   const both = to.flatMap((id, i) => (at.has(id) ? [{ id, from: at.get(id)!, weight: Math.min(i, to.length - 1 - i) }] : []));
   if (both.every((x, i) => i === 0 || both[i - 1].from < x.from)) return new Set(both.map((x) => x.id));
+  if (moved) {
+    const other = (id: string): boolean => !moved.has(id);
+    return staying(from.filter(other), to.filter(other));
+  }
   const best = both.map((x) => ({ count: 1, weight: x.weight, prev: -1 }));
   const better = (a: { count: number; weight: number }, b: { count: number; weight: number }): boolean => a.count > b.count || (a.count === b.count && a.weight >= b.weight);
   let end = 0;
@@ -55,10 +60,12 @@ function staying(from: readonly string[], to: readonly string[]): Set<string> {
 /**
  * The runs that turn the order `from` into `to`: what `to` holds but the things that keep their
  * places (see staying), the things `from` does not hold among them. None when `to` keeps `from`'s
- * order.
+ * order. `moved`: the things known to be the ones put elsewhere, which the two orders alone do not
+ * tell (most of an order brought to the front reads as the few left sent behind): they are the ones
+ * moved, so that a move of one of the others made at once by another person is kept.
  */
-export function runsBetween(from: readonly string[], to: readonly string[]): Run[] {
-  const stay = staying(from, to);
+export function runsBetween(from: readonly string[], to: readonly string[], moved?: ReadonlySet<string>): Run[] {
+  const stay = staying(from, to, moved);
   const runs: Run[] = [];
   let ids: string[] = [];
   let after: string | null = null;

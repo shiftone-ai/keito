@@ -1,6 +1,5 @@
 import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
-import { uuid } from '../model/ids';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
@@ -14,6 +13,7 @@ import { type Role, readAccess, readAnswer, readArrival, readLetGo, writeCommit,
 import { type LinkRefusal, refusalOf, refusalText } from './refusals';
 import type { TextAt, TextSession } from '../model/target';
 import { typeIntoBoard } from './typing';
+import { editNames, operationsOf } from './unsent';
 
 /** Where a shared project is, and the credential that lets this client in. */
 export interface SharedJoin {
@@ -30,6 +30,7 @@ export interface SharedJoin {
  * be); `failure`: why the last store failed (they are sent again); `refusal`: why the link is
  * 'refused'. `device`: whether the project and its pictures still to be sent are kept on this device
  * as this page holds them (see kept.ts), and `deviceFailure`, why not while it is 'failed'.
+ * The edits in `pending` are counted by operation, as the user made them (see unsent.ts).
  */
 export interface ShareStatus {
   link: 'connecting' | 'online' | 'offline' | 'refused';
@@ -73,6 +74,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
   /** Per board, what this client did there, to be undone: its own drawing edits, nothing else. */
   const histories = new Map<string, Y.UndoManager>();
   const pending = new Map<string, Uint8Array>();
+  const names = editNames();
   const listeners = new Set<() => void>();
   const status: Pick<ShareStatus, 'link' | 'role' | 'failure' | 'refusal'> = { link: 'connecting', role: null, failure: null, refusal: null };
   let closed = false;
@@ -236,7 +238,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
 
   ydoc.on('update', (update: Uint8Array, origin: unknown) => {
     if (origin === drawing || origin === manage || origin instanceof Y.UndoManager) {
-      const op = uuid();
+      const op = names.id();
       pending.set(op, update);
       send(op, update);
     }
@@ -289,7 +291,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
     ready,
     status: (): ShareStatus => {
       const p = pictures.status();
-      return { ...status, failure: status.failure ?? p.failure, pending: pending.size + p.unsent, device: p.unkept ? 'failed' : p.keeping ? 'saving' : copy.state(), deviceFailure: copy.failure() ?? p.unkept };
+      return { ...status, failure: status.failure ?? p.failure, pending: operationsOf(pending.keys()) + p.unsent, device: p.unkept ? 'failed' : p.keeping ? 'saving' : copy.state(), deviceFailure: copy.failure() ?? p.unkept };
     },
     /** The project's pictures: those put on its boards here, and those of others, as this page has them. */
     pictures,
@@ -311,7 +313,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       const at = editing() ? tracked(board) : null;
       if (!at) return;
       if (!joins) at.history.stopCapturing();
-      draw(board, () => writeEdit(at, edit));
+      names.edit(joins, () => draw(board, () => writeEdit(at, edit)));
     },
     /**
      * Link a device of a board to the project's shared devices, or unlink it, or delete a shared
@@ -348,12 +350,14 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
      * Type into a text of a board (see typing.ts): what is typed is this client's edit of the board, a
      * step to undo of its own or, `joins`, part of its last. Null when the text is not there, or when
      * no longer editing the project.
+     * Until it ends, what is typed counts as one operation not yet stored (see unsent.ts).
      */
     typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
       const parts = editing() ? tracked(board) : null;
       // Not through `draw`: unmarked by a board (see tracked), a change is in no board's history.
       const outsideHistory = (write: () => void): void => ydoc.transact(write, drawing);
-      return parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), outsideHistory, history: parts.history, joins, editing });
+      const session = parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), outsideHistory, history: parts.history, joins, editing });
+      return session && names.typing(session);
     },
     /** Add an empty board to the project; returns its id, or null when no longer editing the project. */
     addBoard(title: string, kind: BoardKind): string | null {
