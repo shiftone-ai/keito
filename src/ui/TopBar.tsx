@@ -1,6 +1,6 @@
 import { ProjectMenu } from './ProjectMenu';
 import { fromYaml } from '../model/dsl';
-import { projectLookingOnly } from '../collab/role';
+import { lookingNote, projectLookingOnly } from '../collab/role';
 import { SHARED_SO_FAR } from '../collab/scope';
 import { randomId } from '../model/ids';
 import { type CollabState, type State, emptyDoc, saveNow, useStore, useTakes } from '../model/store';
@@ -130,6 +130,7 @@ export function TopBar() {
   const mode = useStore((s) => s.mode);
   const viewing = useStore((s) => !!s.viewing);
   const projectLooking = useStore(projectLookingOnly);
+  const lookingWhy = useStore(lookingNote);
   const kind = useStore((s) => kindOf(s.doc));
   const comments = useStore((s) => openComments(s.doc).length);
   const st = useStore.getState;
@@ -142,7 +143,7 @@ export function TopBar() {
       {/* The project on screen (its boards are the tabs below), and the others to jump to. */}
       <ProjectMenu />
       {/* Boards and files: made, copied, opened, deleted. */}
-      <button className="ghost" disabled={projectLooking} onClick={() => openBoards(true)} data-tip="新しいボードを作る（種類を選ぶ）">
+      <button className="ghost" disabled={projectLooking} onClick={() => openBoards(true)} data-tip={projectLooking ? lookingWhy : '新しいボードを作る（種類を選ぶ）'}>
         {ICON.plus}
         新しいボード
       </button>

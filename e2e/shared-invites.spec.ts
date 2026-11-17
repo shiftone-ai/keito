@@ -171,6 +171,8 @@ test('a viewer is shown the boards of the project, and is offered none to add, r
   await expect(v.locator('.board-tab.add')).toHaveCount(0);
   await expect(newBoard(a)).toBeEnabled();
   await expect(newBoard(v)).toBeDisabled();
+  await newBoard(v).hover();
+  await expect(v.locator('.tip.on')).toHaveText('閲覧のみの招待では編集できません');
 
   for (const page of [a, v]) await openBoardsWindow(page);
   await expect(boardEdits(a)).toHaveCount(4);
