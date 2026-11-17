@@ -17,7 +17,7 @@ const NOWHERE: PictureView = { status: 'unreachable', url: null, reason: null };
 /**
  * What a picture not shown as it stands is labelled with, and whether it is something to act on.
  * What is tried again by itself is said not to have happened yet (できていません), not to be impossible.
- * One the server turned away is labelled with why instead (see SharedPicture).
+ * One the server turned away says why instead, where the picture is wide enough (see SharedPicture).
  */
 const LABELS: Record<Exclude<PictureStatus, 'shown'>, { text: string; alarm: boolean }> = {
   unsent: { text: '未送信', alarm: false },
@@ -59,17 +59,17 @@ export function SharedPicture({ n }: { n: ImageNode }) {
     const picture = <image href={view.url} x={x} y={y} width={w} height={h} preserveAspectRatio="xMidYMid meet" />;
     if (view.status === 'shown') return picture;
     const label = LABELS[view.status];
-    const text = (view.status === 'refused' && view.reason) || label.text;
+    const why = view.status === 'refused' ? view.reason : null;
     const c = label.alarm ? ALARM_COLORS : CALM;
-    const full = BADGE.pad * 2 + BADGE.icon + 4 + measure(text, `600 ${BADGE.size}px ${UI_FONT}`);
-    // Wider than the picture on screen, it is shown as its icon alone (the words stay in its title).
-    const words = full + BADGE.inset * 2 <= w * zoom;
-    const bw = words ? full : BADGE.pad * 2 + BADGE.icon;
+    const widthOf = (words: string): number => BADGE.pad * 2 + BADGE.icon + 4 + measure(words, `600 ${BADGE.size}px ${UI_FONT}`);
+    // Wider than the picture on screen, the reason gives way to the label, and the label to the icon alone (the words stay in its title).
+    const words = [why, label.text].find((text) => text && widthOf(text) + BADGE.inset * 2 <= w * zoom);
+    const bw = words ? widthOf(words) : BADGE.pad * 2 + BADGE.icon;
     return (
       <>
         {picture}
         <g className="picture-badge" transform={`translate(${x + BADGE.inset / zoom},${y + BADGE.inset / zoom}) scale(${1 / zoom})`}>
-          <title>{view.reason ?? text}</title>
+          <title>{why ? `${label.text}（${why}）` : (view.reason ?? label.text)}</title>
           <rect width={bw} height={BADGE.height} rx={BADGE.height / 2} fill={c.badge} stroke={c.edge} />
           <g transform={`translate(${BADGE.pad},${(BADGE.height - BADGE.icon) / 2})`} stroke={c.ink} {...LINE}>
             {label.alarm && <circle cx={6} cy={6} r={5.5} />}
@@ -77,7 +77,7 @@ export function SharedPicture({ n }: { n: ImageNode }) {
           </g>
           {words && (
             <text x={BADGE.pad + BADGE.icon + 4} y={BADGE.height / 2 + BADGE.size * 0.36} fontSize={BADGE.size} fontWeight={600} fontFamily={UI_FONT} fill={c.ink}>
-              {text}
+              {words}
             </text>
           )}
         </g>

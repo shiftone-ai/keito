@@ -94,7 +94,7 @@ function SharedSaveState({ collab, saving, saveError, project }: { collab: Colla
     );
   const shared = `共有中の案件「${project}」（試験中: ${SHARED_SO_FAR}を共有します）`;
   const pictures = collab.pictures.status();
-  const next = pictures.turnedAway && pictures.failure === saveError ? '自動ではやり直しません。「もう一度」を押すと送り直します。' : '少しずつ間をあけて自動でやり直しています。';
+  const next = pictures.turnedAway && pictures.failure === saveError ? '自動では送り直しません。「もう一度」を押すと送り直します。' : '少しずつ間をあけて自動でやり直しています。';
   const [text, tip] = unkept
     ? ['本端末に保存できていません', saveError ?? '理由は不明']
     : saving === 'error'
