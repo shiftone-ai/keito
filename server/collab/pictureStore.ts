@@ -118,26 +118,20 @@ export function pictureStore(engine: PictureEngine, limits: { perProject: number
 
     /**
      * Take off the pictures of a project that `pick` chooses among those kept; resolves to those
-     * the engine has let go. Nothing is awaited from the call of `pick` until they are no longer
-     * known: what `pick` reads of the project still holds then, and no picture is put in between.
-     * One of them put again is kept anew, and stays. They count against the project's limit until
-     * the engine has let them go. Rejects when the engine fails to.
+     * the engine has let go. `pick` is called in turn with the pictures put, once none is being
+     * kept, and nothing is awaited from its call until the engine is asked to let the first one go:
+     * what `pick` reads of the project still holds then. One of them put again is kept anew, after
+     * it is let go. Rejects when the engine fails to let one go.
      */
-    async takeOff(project: string, pick: (names: string[]) => string[]): Promise<string[]> {
-      const kept = await keptOf(project);
-      const picked = pick([...kept.sizes.keys()]).map((name) => ({ name, size: kept.sizes.get(name) ?? 0 }));
-      if (!picked.length) return [];
-      for (const { name } of picked) kept.sizes.delete(name);
-      // In turn with the pictures put: one put again is kept after it is let go, not let go after it is kept.
+    takeOff(project: string, pick: (names: string[]) => string[]): Promise<string[]> {
       return inTurn(async () => {
+        const kept = await keptOf(project);
         const gone: string[] = [];
-        for (const { name, size } of picked) {
-          // Put again while this waited its turn: kept anew, it stays, counted once.
-          if (!kept.sizes.has(name)) {
-            await sure(project, engine.takeOff(project, name));
-            gone.push(name);
-          }
-          kept.total -= size;
+        for (const name of pick([...kept.sizes.keys()])) {
+          await sure(project, engine.takeOff(project, name));
+          kept.total -= kept.sizes.get(name) ?? 0;
+          kept.sizes.delete(name);
+          gone.push(name);
         }
         return gone;
       });

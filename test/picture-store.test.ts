@@ -49,21 +49,25 @@ describe('the pictures a store keeps, whatever keeps their bytes', () => {
     expect(new Set(await at(pictureStore(memoryEngine(), { perProject: Infinity })))).toEqual(new Set(['stored']));
   });
 
-  it('keeps anew, and leaves, a picture sent before it was taken off and kept only after', async () => {
-    const [one, other] = [picture('置き直した画像'), picture('先に送った画像')];
+  it('picks what to take off only once the pictures sent before are kept, among those kept by then', async () => {
+    const one = picture('保存の途中の画像');
     let letGo!: () => void;
     const held = new Promise<void>((resolve) => (letGo = resolve));
     const quick = memoryEngine();
-    // An engine that takes its time to keep the other picture, as one over a network does.
-    const engine: PictureEngine = { ...quick, keep: async (project, name, bytes) => (name === nameOf(other) ? held : Promise.resolve()).then(() => quick.keep(project, name, bytes)) };
-    const pictures = pictureStore(engine, { perProject: Infinity });
-    await pictures.put('a', nameOf(one), one);
-    const waiting = [pictures.put('a', nameOf(other), other), pictures.put('a', nameOf(one), one)];
-    const taken = pictures.takeOff('a', () => [nameOf(one)]);
+    // An engine that takes its time to keep a picture, as a disk or a network does.
+    const pictures = pictureStore({ ...quick, keep: (project, name, bytes) => held.then(() => quick.keep(project, name, bytes)) }, { perProject: Infinity });
+    const sent = pictures.put('a', nameOf(one), one);
+    let picked = false;
+    const taken = pictures.takeOff('a', (names) => {
+      picked = true;
+      return names;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(picked).toBe(false);
     letGo();
-    expect(await Promise.all(waiting)).toEqual(['stored', 'stored']);
-    expect(await taken).toEqual([]);
-    expect(await pictures.get('a', nameOf(one))).toEqual(one);
+    expect(await sent).toBe('stored');
+    expect(await taken).toEqual([nameOf(one)]);
+    expect(await pictures.get('a', nameOf(one))).toBeNull();
   });
 });
 
@@ -195,6 +199,26 @@ describe('the pictures no board uses', () => {
     expect(await kept()).toEqual([name]);
   });
 
+  it('are left alone when their project is deleted while the sweep waits for a picture being kept', async () => {
+    const name = await send('削除の直前の画像');
+    await sweep.run(T0);
+    let letGo!: () => void;
+    const held = new Promise<void>((resolve) => (letGo = resolve));
+    const quick = engine;
+    // An engine that takes its time to keep a picture, as a disk or a network does.
+    engine = { ...quick, keep: (project, picture, bytes) => held.then(() => quick.keep(project, picture, bytes)) };
+    store.close();
+    start();
+    const other = picture('保存の途中の画像');
+    const sent = pictures.put(seed.id, nameOf(other), other);
+    const sweeping = sweep.run(T0 + PERIOD);
+    await new Promise((resolve) => setImmediate(resolve));
+    store.deleteProject(seed.id);
+    letGo();
+    await Promise.all([sent, sweeping]);
+    expect(await kept()).toEqual([name, nameOf(other)].sort());
+  });
+
   it('still count, and go a period later, when their engine fails to take them off', async () => {
     let failing = true;
     const sound = engine;
@@ -219,6 +243,27 @@ describe('the pictures no board uses', () => {
     expect(await kept()).toEqual([name]);
     await sweep.run(T0 + 2 * PERIOD + DAY);
     expect(await kept()).toEqual([]);
+  });
+
+  it('are kept anew when they are sent after their engine let them go and failed to say so', async () => {
+    const sound = engine;
+    // An engine whose answer is lost on the way back, as one over a network may be.
+    engine = {
+      ...sound,
+      async takeOff(project, name) {
+        await sound.takeOff(project, name);
+        throw new Error('the answer was lost');
+      },
+    };
+    store.close();
+    start();
+    const bytes = picture('返事のなかった画像');
+    const name = await send('返事のなかった画像');
+    await sweep.run(T0);
+    await sweep.run(T0 + PERIOD);
+    expect(await kept()).toEqual([]);
+    expect(await pictures.put(seed.id, name, bytes)).toBe('stored');
+    expect(await kept()).toEqual([name]);
   });
 
   it('are known to be unused since when through a restart of the server', async () => {
