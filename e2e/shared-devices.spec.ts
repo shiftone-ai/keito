@@ -79,7 +79,7 @@ async function typeIp(page: Page, ip: string): Promise<void> {
   await field(page, 'IP アドレス').press('Enter');
 }
 
-/** On the system board a PC, and on a second system board a PC linked to it from the inspector: browser a on the second, b on the first. */
+/** On the system board a PC, and on a second system board a PC linked to it from the inspector: browser a on the second, b on the first with its PC selected. */
 async function onTwoBoards(browser: Browser) {
   const [a, b] = await Promise.all([openLink(browser), openLink(browser)]);
   await putDevice(a.page, 'PC', 0, -120);
@@ -89,12 +89,14 @@ async function onTwoBoards(browser: Browser) {
   await clickOn(a.page, device(a.page, 'PC'));
   await inspector(a.page).locator('.shared-suggest button', { hasText: 'つなぐ' }).click();
   await expect(inspector(a.page).locator('.shared-list li', { hasText: '配置' })).toHaveCount(1);
+  await clickOn(b.page, device(b.page, 'PC'));
+  // Not before b has heard of the link: an IP b gives the PC until then is lost (#68).
+  await expect(inspector(b.page).locator('.shared-list li', { hasText: '裏' })).toHaveCount(1);
   return { a, b };
 }
 
 test('two browsers keep a PC placed on two boards as one: an IP given on one board is on the other board too, and deleting it from all boards says what goes and one undo brings it back', async ({ browser }) => {
   const { a, b } = await onTwoBoards(browser);
-  await clickOn(b.page, device(b.page, 'PC'));
   await typeIp(b.page, '192.168.0.10');
   await expect(field(a.page, 'IP アドレス')).toHaveValue('192.168.0.10');
   expect(await networkRows(a.page)).toEqual(['PC  192.168.0.10']);
@@ -129,7 +131,6 @@ test('two browsers keep a PC placed on two boards as one: an IP given on one boa
 
 test("software on a third board runs on the shared PC, showing its host name and IP as they are now and listing them as the system board does; with the PC deleted it has no host", async ({ browser }) => {
   const { a, b } = await onTwoBoards(browser);
-  await clickOn(b.page, device(b.page, 'PC'));
   await typeIp(b.page, '192.168.0.10');
 
   await addBoard(a.page, 'ソフト', 'ソフトウェア構成図');
