@@ -1069,7 +1069,6 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
    * 'unreadable' when it cannot be read.
    */
   async function switchTo(b: Backend, id: string): Promise<'shown' | 'stayed' | 'superseded' | 'unreadable'> {
-    const was = useStore.getState();
     const request = { id };
     loading = request;
     const current = scope();
@@ -1078,10 +1077,17 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       const left = await leave();
       if (superseded()) return 'superseded';
       if (!left) return 'stayed';
+      const beforeLoad = useStore.getState().doc;
       const doc = await tryLoad(b, id);
       if (superseded()) return 'superseded';
       if (!doc) return 'unreadable';
-      target.edits.keepSteps(was);
+      const shown = useStore.getState();
+      if (target.local && !shown.viewing && shown.doc !== beforeLoad) {
+        const left = await leave();
+        if (superseded()) return 'superseded';
+        if (!left) return 'stayed';
+      }
+      target.edits.keepSteps(useStore.getState());
       show(doc);
       return 'shown';
     } finally {

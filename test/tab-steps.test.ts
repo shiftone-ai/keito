@@ -18,6 +18,9 @@ async function start(...ids: string[]) {
   await boot(backend);
   box.delay = 100;
   return {
+    backend,
+    box,
+    state: useStore.getState,
     press: (step: 1 | -1) => useStore.getState().openBoard(nextTab(step)!),
     click: (id: string) => useStore.getState().openBoard(id),
     wait: (ms: number) => vi.advanceTimersByTimeAsync(ms),
@@ -74,5 +77,79 @@ describe('the board still loading, asked for again (⌘N held down, or its tab c
     click('b');
     await wait(60);
     expect(now()).toBe('b');
+  });
+});
+
+describe('edits made while another board is loading', () => {
+  it.each([
+    ['when its tab is clicked again', true],
+    ['without clicking its tab again', false],
+  ])('writes the edit before showing the loaded board %s', async (_, clickAgain) => {
+    const { box, state, click, wait, now } = await start('a', 'b');
+    click('b');
+    await wait(50);
+    expect(now()).toBe('a');
+    state().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'a edited' } }));
+    if (clickAgain) click('b');
+    await wait(60);
+    expect(now()).toBe('b');
+    expect(box.kept.get('a')?.doc.meta.title).toBe('a edited');
+  });
+
+  it('keeps editing while the write is under way, and can undo the last edit on return', async () => {
+    const { backend, box, state, click, wait, now } = await start('a', 'b');
+    click('b');
+    await wait(50);
+    const save = backend.save;
+    vi.spyOn(backend, 'save').mockImplementationOnce(async (doc) => {
+      await new Promise((done) => setTimeout(done, 50));
+      await save(doc);
+    });
+    state().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'first edit' } }));
+    await wait(60);
+    expect(now()).toBe('a');
+    state().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'second edit' } }));
+    const view = { x: 12, y: 34, k: 2 };
+    state().setView(view);
+    await wait(50);
+    expect(now()).toBe('b');
+    expect(box.kept.get('a')?.doc.meta.title).toBe('second edit');
+    click('a');
+    await wait(110);
+    expect(now()).toBe('a');
+    expect(state().view).toEqual(view);
+    state().undo();
+    expect(state().doc.meta.title).toBe('first edit');
+  });
+
+  it('stays on the board if its edit conflicts with a write elsewhere', async () => {
+    const { box, state, click, wait, now } = await start('a', 'b');
+    click('b');
+    await wait(50);
+    state().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'a edited' } }));
+    const a = box.kept.get('a')!;
+    box.kept.set('a', { doc: { ...a.doc, meta: { ...a.doc.meta, title: 'a changed elsewhere' } }, serial: a.serial + 1 });
+    await wait(60);
+    expect(now()).toBe('a');
+    expect(state().saving).toBe('conflict');
+    expect(box.kept.get('a')?.doc.meta.title).toBe('a changed elsewhere');
+  });
+
+  it('stays on the board if its edit could not be written and the user keeps it', async () => {
+    const { backend, state, click, wait, now } = await start('a', 'b');
+    click('b');
+    await wait(50);
+    vi.spyOn(backend, 'save').mockRejectedValueOnce(new Error('store unavailable'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    try {
+      state().mutate((d) => ({ ...d, meta: { ...d.meta, title: 'a edited' } }));
+      await wait(60);
+      expect(now()).toBe('a');
+      expect(state().saving).toBe('error');
+      expect(state().doc.meta.title).toBe('a edited');
+      expect(confirm).toHaveBeenCalledOnce();
+    } finally {
+      confirm.mockRestore();
+    }
   });
 });
