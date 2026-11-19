@@ -483,6 +483,39 @@ describe('pictures on a shared board', () => {
     expect(b.images()).toHaveLength(1);
   });
 
+  it('are sent again when undo brings them back after a send that failed on reopening', async () => {
+    const net = network();
+    net.set('a', 'PUT', 'cut');
+    const a = await person('a');
+    const placed = await a.insert(picture('開き直したあとに再送').dataUrl);
+    const name = sharedName(srcOf(placed))!;
+    await until(() => a.s().collab?.pending === 1 && a.s().collab?.device === 'saved', 5_000, 'the board to be stored with the picture still unsent');
+    a.session.dispose();
+
+    net.set('a', 'PUT', 'hold');
+    const again = await person('a', { device: a.device, pictures: a.pictures });
+    await until(() => net.held() === 1, 5_000, 'the picture to be sent on reopening');
+    const sending = again.watch(name);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      net.set('a', 'PUT', 503);
+      net.release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sending.status()).toBe('failed');
+
+      again.s().removeIds([placed.id]);
+      net.set('a', 'PUT', undefined);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(net.through('a', 'PUT')).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    again.s().undo();
+    expect(again.images().map((n) => n.id)).toContain(placed.id);
+    await expect.poll(async () => (await request(seed.id, name, token)).status, { timeout: 5_000 }).toBe(200);
+  });
+
   it('are not said to be kept on this device before it has kept one still to be sent, nor when it could not', async () => {
     const net = network();
     net.set('a', 'PUT', 'hold');

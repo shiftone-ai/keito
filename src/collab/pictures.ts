@@ -370,8 +370,8 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
         keeping: out.some((o) => o.keeping),
       };
     },
-    /** Take the set of names used on the project's boards. A previously refused picture is sent
-     * again when it comes back to a board. The caller publishes the project's new status. */
+    /** Take the set of names used on the project's boards. A picture waiting for a board is sent
+     * again when it comes back. The caller publishes the project's new status. */
     usedByBoards(names: ReadonlySet<string>): void {
       const before = used;
       used = names;
@@ -387,7 +387,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
           update(p);
         }
         out.wasUsed = true;
-        send ||= out.boardOnly !== null && out.state === 'unsent';
+        send ||= out.boardOnly !== null && (out.state === 'unsent' || out.state === 'failed');
       }
       if (send) void pump();
     },
