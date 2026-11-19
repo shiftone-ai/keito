@@ -91,6 +91,10 @@ const blobOf = (body: PictureBody): Blob => new Blob([body.bytes as Uint8Array<A
 /** A picture put on the board here, until the server has it. */
 interface Outgoing {
   state: 'unsent' | 'sending' | 'failed' | 'denied';
+  /** A restored or refused picture waits while no board uses it. */
+  boardOnly: 'restored' | 'refused' | null;
+  /** Whether a board has used it on this page, including before it was taken off. */
+  wasUsed: boolean;
   tries: number;
   /** Why the last try the server answered failed; kept through the tries after it. */
   reason: string | null;
@@ -133,9 +137,10 @@ const sameView = (a: PictureView, b: PictureView): boolean => a.status === b.sta
 
 /**
  * The pictures of the shared project `join` on this page, kept on `device` (none: on this page alone)
- * under the project and its server. Pictures put on a board here and left unsent (offline, the page
- * closed) are sent once more when the project is opened again here; the server keeps each picture
- * once, however often it is sent. `notify` is called whenever one changes how it stands.
+ * under the project and its server. Pictures left unsent are sent once more when the project is
+ * opened here if a board uses them; a refused picture taken off waits until a board uses it again.
+ * The server keeps each picture once, however often it is sent. `notify` is called when sending or
+ * keeping a picture changes the project's status.
  */
 export function projectPictures(join: SharedJoin, device: PictureDevice | null, notify: () => void) {
   const pictures = new Map<string, Picture>();
@@ -143,10 +148,14 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
   const keyOf = (name: string): string => prefix + name;
   const address = (name: string): string => pictureAddress(join.server, join.project, name);
   const authorization = { Authorization: `Bearer ${join.token}` };
+  const keptUnsent = new Set<string>();
+  let used: ReadonlySet<string> = new Set();
+  let synced = false;
   let closed = false;
   let sending = false;
   let sendRetries = 0;
   let sendTimer: ReturnType<typeof setTimeout> | undefined;
+  const pending = (name: string, out: Outgoing): boolean => !out.boardOnly || used.has(name);
 
   function entry(name: string): Picture {
     let p = pictures.get(name);
@@ -176,8 +185,9 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
 
   /** Send the pictures still to be sent, one at a time; after a try that failed, the rest wait for the next. */
   async function pump(): Promise<void> {
-    const p = [...pictures.values()].find((x) => x.out && x.out.state !== 'denied' && x.body);
-    if (sending || closed || !p) return;
+    if (sending || closed) return;
+    const p = [...pictures.values()].find((x) => x.body && x.out && x.out.state !== 'denied' && pending(x.name, x.out) && (synced || x.out.boardOnly !== 'restored'));
+    if (!p) return;
     const out = p.out!;
     sending = true;
     out.state = 'sending';
@@ -193,7 +203,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
         void device?.sent(keyOf(p.name)).catch(() => {});
         goOn = true;
       } else if (res.status === 403 || res.status === 413 || res.status === 507) {
-        [out.state, out.reason] = ['denied', await denialOf(res)];
+        [out.state, out.reason, out.boardOnly] = ['denied', await denialOf(res), 'refused'];
         goOn = true;
       } else {
         [out.state, out.reason] = ['failed', `サーバーの応答 ${res.status}`];
@@ -276,20 +286,27 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
     return () => void p.hearers.delete(hear);
   }
 
-  // What was put on a board here and left unsent when the project was last open here.
+  /** Load a picture left unsent on this device when a board uses its name, so it can be sent again. */
+  async function restore(name: string): Promise<void> {
+    if (!device || !keptUnsent.delete(name)) return;
+    const kept = await device.load(keyOf(name)).catch(() => null);
+    if (closed || !kept) return;
+    const p = entry(name);
+    p.out ??= { state: 'unsent', boardOnly: 'restored', wasUsed: true, tries: 0, reason: null, unkept: null, keeping: false };
+    if (p.body) update(p);
+    else setBody(p, blobOf(kept));
+    void pump();
+  }
+
   void (async () => {
-    const keys = device ? await device.unsent(prefix).catch(() => []) : [];
+    if (!device) return;
+    const keys = await device.unsent(prefix).catch(() => []);
+    if (closed) return;
     for (const key of keys) {
       const name = key.slice(prefix.length);
-      const kept = isPictureName(name) ? await device!.load(key).catch(() => null) : null;
-      if (closed) return;
-      if (!kept) continue;
-      const p = entry(name);
-      p.out ??= { state: 'unsent', tries: 0, reason: null, unkept: null, keeping: false };
-      if (p.body) update(p);
-      else setBody(p, blobOf(kept));
+      if (isPictureName(name)) keptUnsent.add(name);
     }
-    void pump();
+    for (const name of used) void restore(name);
   })();
 
   return {
@@ -310,7 +327,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       const p = entry(picture.name);
       if (!p.body) setBody(p, picture.blob);
       if (p.out) return src;
-      const out: Outgoing = { state: 'unsent', tries: 0, reason: null, unkept: null, keeping: false };
+      const out: Outgoing = { state: 'unsent', boardOnly: null, wasUsed: used.has(p.name), tries: 0, reason: null, unkept: null, keeping: false };
       p.out = out;
       update(p);
       await keepUnsent(p, out);
@@ -341,7 +358,7 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
     },
     /** What the pictures put on a board here and not yet sent add to the project's status. */
     status(): PicturesStatus {
-      const out = [...pictures.values()].flatMap((p) => (p.out ? [p.out] : []));
+      const out = [...pictures.values()].flatMap((p) => (p.out && pending(p.name, p.out) ? [p.out] : []));
       // Kept while it is sent again, as the edits' failure is: the top bar does not flip at each try.
       const failing = out.find((o) => o.reason);
       const unkept = out.find((o) => o.unkept);
@@ -352,6 +369,33 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
         unkept: unkept ? `画像を端末に保存できません（${unkept.unkept}）` : null,
         keeping: out.some((o) => o.keeping),
       };
+    },
+    /** Take the set of names used on the project's boards. A picture waiting for a board is sent
+     * again when it comes back. The caller publishes the project's new status. */
+    usedByBoards(names: ReadonlySet<string>): void {
+      const before = used;
+      used = names;
+      let send = false;
+      for (const name of names) {
+        if (before.has(name)) continue;
+        void restore(name);
+        const p = pictures.get(name);
+        if (!p?.out) continue;
+        const out = p.out;
+        if (out.state === 'denied' && out.wasUsed) {
+          out.state = 'unsent';
+          update(p);
+        }
+        out.wasUsed = true;
+        send ||= out.boardOnly !== null && (out.state === 'unsent' || out.state === 'failed');
+      }
+      if (send) void pump();
+    },
+    /** Begin sending pictures held across a reopen once the server's board edits have arrived. */
+    resumeAfterSync(): void {
+      if (synced) return;
+      synced = true;
+      void pump();
     },
     /** A picture the server says it now keeps: fetched at once if it is waited for. */
     arrived(name: string): void {
@@ -369,13 +413,13 @@ export function projectPictures(join: SharedJoin, device: PictureDevice | null, 
       sendRetries = 0;
       clearTimeout(sendTimer);
       for (const p of pictures.values()) {
-        if (p.out?.state !== 'denied') continue;
+        if (p.out?.state !== 'denied' || !pending(p.name, p.out)) continue;
         p.out.state = 'unsent';
         update(p);
       }
       void pump();
       for (const p of pictures.values()) {
-        if (p.out?.unkept && !p.out.keeping) void keepUnsent(p, p.out);
+        if (p.out?.unkept && !p.out.keeping && pending(p.name, p.out)) void keepUnsent(p, p.out);
         if (!p.hearers.size || p.fetch === 'denied') continue;
         p.retries = 0;
         want(p);
