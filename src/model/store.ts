@@ -173,6 +173,8 @@ export interface State {
   setEditing(id: string | null): void;
   /** Type into a text of the board on screen character by character (see Edits.typeInto); null where the field holds it until it is written whole, or on an older state on screen. */
   typeInto(at: TextAt, joins: boolean): TextSession | null;
+  /** Grow a shared node for text received during editing (see Edits.growSharedText). */
+  growSharedText(id: string, height: number): void;
   setPanel(panel: Panel): void;
   /** Open or close a side panel (toggled when `on` is left out). */
   setDock(dock: Dock, on?: boolean): void;
@@ -362,6 +364,10 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
       setView: (view) => set({ view }),
       setEditing: (editing) => void ((!editing || takes('typing')) && set({ editing })),
       typeInto: (at, joins) => (get().viewing ? null : target.edits.typeInto(at, joins)),
+      growSharedText: (id, height) => {
+        const s = get();
+        if (!s.viewing && s.editing === id) target.edits.growSharedText(id, height);
+      },
       setPanel: (panel) => set({ panel }),
       setDock: (dock, on) => set((s) => ({ docks: { ...s.docks, [dock]: on ?? !s.docks[dock] } })),
       fit: () => {

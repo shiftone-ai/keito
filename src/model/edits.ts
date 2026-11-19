@@ -84,5 +84,6 @@ export function localEdits(host: EditsHost): LocalEdits {
     clear: () => kept.clear(),
     // The field typed into holds the text until it is written whole (see TextEditor in Canvas.tsx).
     typeInto: () => null,
+    growSharedText: () => {},
   };
 }

@@ -15,6 +15,13 @@ export interface TextField {
   write(text: string, range: TextRange): void;
 }
 
+/** Changes a field's owner may act on while typing (see bindField). */
+export interface TypingEvents {
+  typed?(): void;
+  heard?(): void;
+  gone?(): void;
+}
+
 /** A field kept the same as a text others type into too (see bindField), told what happens in it. */
 export interface Typing {
   /** The field changed by itself (a letter typed, a deletion, a cut). `composing`: part of a conversion still under way (IME). */
@@ -53,10 +60,10 @@ function mapRange([anchor, focus]: TextRange, delta: TextDelta): TextRange {
  * a change to the text (never the field's whole text in place of it); what others type is shown in
  * the field with the selection kept on what it was on. While the IME converts, the field is left
  * alone and what others type is held back, to be shown once the conversion is put down, which goes
- * where it was typed. `typed`: after a change typed is sent; `gone`: the text is no longer there
- * (the field may then `follow` a typing into it elsewhere).
+ * where it was typed. `typed`: after a change typed is sent; `heard`: when another editor's change
+ * arrives; `gone`: the text is no longer there (the field may then `follow` a typing into it elsewhere).
  */
-export function bindField(field: TextField, first: TextSession, on: { typed?(): void; gone?(): void } = {}): Typing {
+export function bindField(field: TextField, first: TextSession, on: TypingEvents = {}): Typing {
   /** The typing the field is kept with: `first`, then one the field follows. */
   let session = first;
   /** The text as the field shows it with every change typed there sent: what the next change is read against. */
@@ -109,8 +116,9 @@ export function bindField(field: TextField, first: TextSession, on: { typed?(): 
   };
 
   /** Take in what others did to the text, shown now unless a conversion is under way. */
-  const hear = (heard: TextDelta | null): void => {
+  const hear = (heard: TextDelta | null, received = false): void => {
     if (!heard) return on.gone?.();
+    if (received) on.heard?.();
     unseen.push(heard);
     if (!composing && ending === undefined) sync();
   };
