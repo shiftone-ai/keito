@@ -152,13 +152,16 @@ export function localSaving(host: SavingHost): LocalSaving {
   /**
    * Its state kept in its history, the board on screen may be left once its changes are written, or
    * the user lets go of those that cannot be (changed or deleted elsewhere, or the store unreachable).
+   * This includes edits made while a write is under way.
    */
   async function leave(): Promise<boolean> {
     const current = host.scope();
     await host.beforeLeave();
     if (!current()) return false;
-    if (await flush()) return true;
-    if (!current()) return false;
+    do {
+      if (await flush()) return true;
+      if (!current()) return false;
+    } while (host.get().saving === 'saving');
     const saving = host.get().saving;
     if (saving === 'conflict') {
       await tell('このボードはほかの場所で更新されています。先に上の「読み込む」か「この画面で上書き」を選んでください。');
