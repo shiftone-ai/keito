@@ -203,4 +203,5 @@ test('a picture the server has no room for says so on the board that sent it, an
   await a.keyboard.press('Delete');
   await expect(placeholder(b)).toHaveCount(0);
   await expect(shown(b)).toHaveCount(1);
+  await expect(a.locator('.save-state')).toHaveText('共同編集先に保存済み');
 });

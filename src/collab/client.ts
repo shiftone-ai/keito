@@ -2,6 +2,7 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
+import { boardPictureNames } from './boardPictures';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
 import { type DeviceLink, linkedTo, shareKey, sharedDevices, writeLink } from './devices';
 import type { BoardEdit } from './edits';
@@ -151,6 +152,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       settle.resolve();
       sendAll();
       copy.changed();
+      if (status.role === 'editor') pictures.resumeAfterSync();
       notify();
     },
     onAuthenticationFailed: ({ reason }) => refuse(reason),
@@ -243,6 +245,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       send(op, update);
     }
     if (joined && origin !== fromDevice) copy.changed();
+    pictures.usedByBoards(boardPictureNames(ydoc));
     notify();
   });
 

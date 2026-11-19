@@ -170,6 +170,21 @@ async function serveWith(serve: Parameters<typeof startServer>[3]): Promise<void
   server = await startServer(data, 0, undefined, serve);
 }
 
+/** An editor with one picture stored and another turned away because only the first fits. */
+async function editorWithRefusedPicture() {
+  const [first, second] = [picture('一枚目'), picture('二枚目')];
+  await serveWith({ args: ['--pictures-per-project', String(first.bytes.length + second.bytes.length - 1)] });
+  const net = network();
+  const a = await person('a');
+  await a.insert(first.dataUrl);
+  await a.stored();
+  const placed = await a.insert(second.dataUrl);
+  const name = nameOf(second.bytes);
+  await until(() => a.watch(name).status() === 'refused', 5_000, 'the picture to be turned away');
+  expect(a.s().saveError).toContain('案件の画像の容量が足りません');
+  return { a, net, placed, second };
+}
+
 describe('the pictures of a shared project on the server', () => {
   it("keep a picture an editor sends, give it to a viewer of the project, and still have it after the server is killed", async () => {
     const { bytes } = picture('一');
@@ -244,6 +259,50 @@ describe('the room the server has for pictures', () => {
     await a.stored(20_000);
     expect(kept().sort()).toEqual([nameOf(first.bytes), name].sort());
   }, 30_000);
+
+  it('stops counting a refused picture once no board uses it', async () => {
+    const { a, net, placed, second } = await editorWithRefusedPicture();
+    a.s().collab!.manage.add('別のボード', 'free');
+    const other = a.s().doc.id;
+    const alsoPlaced = await a.insert(second.dataUrl);
+    a.s().openBoard(seed.board.id);
+    a.s().removeIds([placed.id]);
+    expect(a.s().saveError).toContain('案件の画像の容量が足りません');
+
+    a.s().openBoard(other);
+    a.s().removeIds([alsoPlaced.id]);
+    await expect.poll(() => ({ saving: a.s().saving, pending: a.s().collab?.pending, failure: a.s().saveError }), { timeout: 5_000 }).toEqual({ saving: 'saved', pending: 0, failure: null });
+    const before = net.through('a', 'PUT');
+    await a.session.saveNow();
+    expect(net.through('a', 'PUT')).toBe(before);
+  });
+
+  it('does not send a refused picture again after it was taken off and the project is opened again', async () => {
+    const { a, net, placed, second } = await editorWithRefusedPicture();
+    a.s().removeIds([placed.id]);
+    await until(() => storedEdits(data, seed.id) === 3 && a.s().collab?.device === 'saved', 5_000, 'the deletion to be stored');
+    a.session.dispose();
+
+    await server.kill();
+    server = await startServer(data, server.port, undefined, { args: ['--pictures-per-project', '1MB'] });
+    const before = net.through('a', 'PUT');
+    const again = await person('a', { device: a.device, pictures: a.pictures });
+    await again.insert(picture('開き直したあと').dataUrl, 400, 200);
+    await again.stored();
+    expect(net.through('a', 'PUT') - before).toBe(1);
+    expect((await request(seed.id, nameOf(second.bytes), token)).status).toBe(404);
+  });
+
+  it('sends a refused picture again when undo brings it back to a board', async () => {
+    const { a, net, placed } = await editorWithRefusedPicture();
+    a.s().removeIds([placed.id]);
+    expect(a.images().map((n) => n.id)).not.toContain(placed.id);
+    const before = net.through('a', 'PUT');
+
+    a.s().undo();
+    expect(a.images().map((n) => n.id)).toContain(placed.id);
+    await expect.poll(() => net.through('a', 'PUT') - before, { timeout: 5_000 }).toBe(1);
+  });
 
   it("keeps the pictures sent at once under the project's limit together", async () => {
     const sent = Array.from({ length: 6 }, (_, i) => picture(`同時 ${i}`).bytes);
