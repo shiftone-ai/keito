@@ -28,6 +28,7 @@ import { SharedMarks, CommentPins, EdgeHandles, segmentHits, distToSegment, prev
 import type { TextSession } from '../model/target';
 import type { Typing } from '../ui/typing';
 import { editableField, typeIntoEditable } from './editable';
+import { emptyTextGoes } from './textCommit';
 
 const MIN = { w: 40, h: 30 };
 
@@ -1380,18 +1381,16 @@ function TextEditor({ id }: { id: string }) {
     done.current = true;
     const s = st();
     const first = fresh === id;
-    const dropped = casual === id;
+    const dropped = casual === id && first;
     fresh = null;
     casual = null;
-    /** Whether the box goes once its text is done: a text box left empty, or one a double-click dropped and left with no text (see below). */
-    const leftEmpty = (text: string): boolean => !!node && !text && (node.type === 'text' || (dropped && first));
     const at = shared.current;
     if (at) {
       at.typing.flush();
       const value = at.session.value();
       const text = value.replace(/\n+$/, '');
       if (text !== value) at.session.edit([{ retain: text.length }, { delete: value.length - text.length }]);
-      const empty = leftEmpty(text);
+      const empty = emptyTextGoes(node, text, dropped, { board: s.doc.id, peers: s.peers });
       if (!empty) grow(receivedText.current);
       finish(!(empty && first));
       if (empty && !first) s.removeIds([id]);
@@ -1400,7 +1399,7 @@ function TextEditor({ id }: { id: string }) {
     const text = read();
     if (edge) {
       if (text !== edge.label) s.updateEdge(id, { label: text });
-    } else if (leftEmpty(text)) {
+    } else if (emptyTextGoes(node, text, dropped)) {
       // A text box left empty would be an invisible, unselectable leftover. Just put down, it is
       // called off altogether: no undo step brings back an empty box.
       s.setEditing(null);
