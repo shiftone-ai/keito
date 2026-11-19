@@ -66,6 +66,8 @@ export interface Edits {
    * machine), or where the text is not there.
    */
   typeInto(at: TextAt, joins: boolean): TextSession | null;
+  /** Grow a shared node for text received during editing, outside this editor's undo history. */
+  growSharedText(id: string, height: number): void;
 }
 
 /**
@@ -87,8 +89,8 @@ export interface TextSession {
   value(): string;
   /** A change typed here, made to the text as `value` gives it. Dropped once the text is gone. */
   edit(delta: TextDelta): void;
-  /** Hear every change to the text not made through `edit` (others' typing, an undo), as made to the text before it; null once the text is gone (its node or line taken off). */
-  listen(hear: (delta: TextDelta | null) => void): () => void;
+  /** Hear a change outside `edit` (others' typing, an undo) and whether it was received from another editor. Null once the text is gone. */
+  listen(hear: (delta: TextDelta | null, received: boolean) => void): () => void;
   /** Take back the last of what was typed, or put back what was last taken back; others' typing stays. */
   undo(): void;
   redo(): void;

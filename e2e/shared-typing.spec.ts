@@ -99,6 +99,46 @@ test('two browsers type into one name at once, at different places, with a paste
   await expect(textField(c)).toHaveValue('C貼り\nA図X\nB');
 });
 
+test('a shape fits both browsers’ lines before either finishes editing', async ({ browser }) => {
+  const a = await openLink(browser);
+  const b = await openLink(browser);
+  await edit(a);
+  await edit(b);
+  const { port } = server;
+  await server.kill();
+  for (const page of [a, b]) await expect(page.locator('.save-state')).toContainText('オフライン');
+
+  await a.keyboard.press('ArrowLeft');
+  await a.keyboard.type('A1');
+  await a.keyboard.press('Enter');
+  await a.keyboard.type('A2');
+  await a.keyboard.press('Enter');
+  await b.keyboard.press('ArrowRight');
+  await b.keyboard.press('Enter');
+  await b.keyboard.type('B1');
+  await b.keyboard.press('Enter');
+  await b.keyboard.type('B2');
+  for (const page of [a, b]) await expect(shape(page)).toHaveAttribute('height', '90');
+
+  server = await startServer(data, port);
+  for (const page of [a, b]) {
+    await expect.poll(() => shown(page), { timeout: 30_000 }).toBe('A1\nA2\n図形\nB1\nB2');
+    await expect(editor(page)).toBeFocused();
+    await expect(shape(page), 'the shape fits all five lines while editing').toHaveAttribute('height', '120');
+  }
+  for (const page of [a, b]) {
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect(editor(page)).toHaveCount(0);
+    await expect(shape(page)).toHaveAttribute('height', '120');
+  }
+
+  await a.keyboard.press('ControlOrMeta+z');
+  for (const page of [a, b]) {
+    await expect(textField(page)).toHaveValue('図形\nB1\nB2');
+    expect(Number(await shape(page).getAttribute('height'))).toBeGreaterThanOrEqual(90);
+  }
+});
+
 test('each browser undoes only its own typing, Escape calling off only its own, and undo while typing takes back what it typed', async ({ browser }) => {
   const a = await openLink(browser);
   const b = await openLink(browser);

@@ -1,5 +1,5 @@
 import type { TextSession } from '../model/target';
-import { type TextField, type Typing, bindField } from '../ui/typing';
+import { type TextField, type Typing, type TypingEvents, bindField } from '../ui/typing';
 import { hearTyping } from '../ui/typingEvents';
 
 /** Whether `br` ends an editable: the last thing in it, there only so that an empty last line shows. */
@@ -58,7 +58,7 @@ export function editableField(el: HTMLElement): TextField {
  * Keep an editable typed into the same as a shared text (see bindField, hearTyping). Line breaks,
  * pastes and drops go in as plain text (`oneLine`: line breaks as spaces).
  */
-export function typeIntoEditable(el: HTMLElement, session: TextSession, options: { oneLine: boolean; typed?(): void; gone?(): void }): Typing {
+export function typeIntoEditable(el: HTMLElement, session: TextSession, options: TypingEvents & { oneLine: boolean }): Typing {
   const typing = bindField(editableField(el), session, options);
   const plain = (text: string): string => {
     const lines = text.replace(/\r\n?/g, '\n');

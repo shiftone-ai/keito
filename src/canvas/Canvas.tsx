@@ -1293,8 +1293,8 @@ function TextEditor({ id }: { id: string }) {
   const startH = useRef(node?.h);
   /** On a shared board: the text, typed into as it is typed (see ui/typing.ts), rather than written whole once done. */
   const shared = useRef<{ session: TextSession; typing: Typing } | null>(null);
-  /** The box's growth as of the last render, for the typing set up once (the node it reads changes as others edit it). */
-  const grown = useRef(() => {});
+  const receivedText = useRef(false);
+  const grown = useRef<(received?: boolean) => void>(() => {});
 
   // Layout effect: focus must land synchronously so a keystroke that opened the
   // editor (including the first IME key) is typed into it.
@@ -1320,13 +1320,26 @@ function TextEditor({ id }: { id: string }) {
       finish(true);
       st().setEditing(null);
     };
-    shared.current = { session, typing: typeIntoEditable(el, session, { oneLine: node?.type === 'frame', typed: () => grown.current(), gone }) };
+    shared.current = {
+      session,
+      typing: typeIntoEditable(el, session, {
+        oneLine: node?.type === 'frame',
+        typed: () => grown.current(),
+        heard: () => { receivedText.current = true; },
+        gone,
+      }),
+    };
     return () => {
       shared.current?.typing.flush();
       finish(true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    // A peer's size can arrive after their text and be too short for the merged lines.
+    if (receivedText.current && shared.current && !done.current) grown.current(true);
+  }, [node]);
 
   /** Stop typing into the shared text: what was typed stays, or (`keep` false) is called off with what joined it. */
   function finish(keep: boolean): void {
@@ -1347,17 +1360,19 @@ function TextEditor({ id }: { id: string }) {
     const text = (shared.current?.session.value() ?? ref.current?.innerText ?? '').replace(/\n+$/, '');
     return oneLine ? text.replace(/\n/g, ' ') : text;
   };
-  // The box follows the text while typing, so a long label never spills out of its shape. No
-  // checkpoint on a shared board: each growth joins the step the typing is.
-  const grow = () => {
-    if (!node) return;
-    const h = neededHeight(node, read());
+  /** Grow for the whole text. A resize for received text stays outside the editor's undo step. */
+  const grow = (received = false) => {
+    const s = st();
+    const current = s.doc.nodes.find((n) => n.id === id);
+    if (!current) return;
+    const h = neededHeight(current, read());
     if (h == null) return;
+    if (received) return s.growSharedText(id, h);
     if (!grew.current) {
       grew.current = true;
-      if (fresh !== id && !shared.current) st().checkpoint();
+      if (fresh !== id && !shared.current) s.checkpoint();
     }
-    st().updateNode(id, { h }, false);
+    s.updateNode(id, { h }, false);
   };
   grown.current = grow;
   const commit = () => {
@@ -1377,8 +1392,7 @@ function TextEditor({ id }: { id: string }) {
       const text = value.replace(/\n+$/, '');
       if (text !== value) at.session.edit([{ retain: text.length }, { delete: value.length - text.length }]);
       const empty = leftEmpty(text);
-      // Grown once more for the whole text: what others typed meanwhile was shown here, not grown for.
-      if (!empty) grow();
+      if (!empty) grow(receivedText.current);
       finish(!(empty && first));
       if (empty && !first) s.removeIds([id]);
       return s.setEditing(null);

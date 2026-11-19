@@ -276,7 +276,7 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
         // Not made an operation of its own: that would be a step of its own to undo, where a board of
         // this machine adds it to the last (the presses of a key held down are one move).
         if (!record && !host.operating()) {
-          project.edit(board, edit, true);
+          project.edit(board, edit, 'join');
           return refresh();
         }
         if (record) host.checkpoint();
@@ -300,6 +300,14 @@ export function sharedTarget(projectId: string, project: SharedProject, host: Ho
       // Nothing of it is kept here: a return to it goes through its project.
       keepSteps: () => {},
       typeInto: (at, joins) => (board && !viewer() ? project.typeInto(board, at, joins) : null),
+      growSharedText(id, height) {
+        if (!board || looking()) return;
+        const n = base.nodes.find((n) => n.id === id);
+        if (!n || height <= n.h) return;
+        const edit = noEdit();
+        edit.set.set(id, { w: n.w, h: height });
+        project.edit(board, edit, 'skip');
+      },
     },
     saving: {
       async flush() {

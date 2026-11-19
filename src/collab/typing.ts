@@ -30,7 +30,7 @@ export interface TypingContext {
 export function openText(text: Y.Text, context: TypingContext): TextSession {
   const { origin, history } = context;
   const doc = text.doc!;
-  const listeners = new Set<(delta: TextDelta | null) => void>();
+  const listeners = new Set<Parameters<TextSession['listen']>[0]>();
   /** Set while a change typed here goes in: it is not told back as heard. */
   let typing = false;
   let ended = false;
@@ -46,13 +46,13 @@ export function openText(text: Y.Text, context: TypingContext): TextSession {
   };
   history.on('stack-item-added', added);
   const heard = (event: Y.YTextEvent): void => {
-    if (!typing) listeners.forEach((hear) => hear(event.delta as TextDelta));
+    if (!typing) listeners.forEach((hear) => hear(event.delta as TextDelta, !event.transaction.local));
   };
   text.observe(heard);
   const check = (): void => {
     if (context.alive()) return;
     doc.off('afterTransaction', check);
-    listeners.forEach((hear) => hear(null));
+    listeners.forEach((hear) => hear(null, false));
   };
   doc.on('afterTransaction', check);
 
@@ -114,8 +114,8 @@ function textAt(place: TextPlace | null): Y.Text | null {
  */
 function openAbsent(doc: Y.Doc, place: () => TextPlace | null, context: Omit<TypingContext, 'alive'>): TextSession {
   type Typed = { session: TextSession; held: string; own: boolean };
-  const listeners = new Set<(delta: TextDelta | null) => void>();
-  const tell = (delta: TextDelta | null): void => listeners.forEach((hear) => hear(delta));
+  const listeners = new Set<Parameters<TextSession['listen']>[0]>();
+  const tell = (delta: TextDelta | null, received = false): void => listeners.forEach((hear) => hear(delta, received));
   /** The typing into the text now there; `held`: what it holds, as last heard; `own`: put there here. */
   let typed: Typed | null = null;
   let ended = false;
@@ -131,15 +131,15 @@ function openAbsent(doc: Y.Doc, place: () => TextPlace | null, context: Omit<Typ
     const session = openText(text, { ...context, alive: () => textAt(place()) === text });
     const now: Typed = { session, held: '', own };
     typed = now;
-    session.listen((delta) => {
+    session.listen((delta, received) => {
       if (!delta) return lost(now);
       now.held = session.value();
-      tell(delta);
+      tell(delta, received);
     });
     const there = text.toString();
     if (carried) session.edit([{ insert: carried }]);
     now.held = session.value();
-    if (there) tell([{ retain: carried.length }, { insert: there }]);
+    if (there) tell([{ retain: carried.length }, { insert: there }], true);
   }
 
   /** The text typed into is no longer there: another has its place, or it has none. */
