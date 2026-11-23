@@ -8,6 +8,8 @@ import type { Doc } from './types';
 export interface SavingHost {
   get(): State;
   set(change: Partial<State> | ((s: State) => Partial<State>)): void;
+  /** The board itself: the live one while an older state is on screen in its place. */
+  board(): Doc;
   /** The store, once connected. */
   backend(): Backend | null;
   /** Whether the session still runs. */
@@ -111,7 +113,7 @@ export function localSaving(host: SavingHost): LocalSaving {
       stored = doc;
       retries = 0;
       clearTimeout(retryTimer);
-      if (here()) host.set((s) => ({ saving: s.doc === doc ? 'saved' : 'saving', saveError: null }));
+      if (here()) host.set({ saving: host.board() === doc ? 'saved' : 'saving', saveError: null });
     } catch (e) {
       if (!here()) return console.error(e);
       // Written or deleted elsewhere since it was read here: the user settles it (see resolveConflict).

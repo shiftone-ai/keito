@@ -588,7 +588,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     };
   });
 
-  const save = localSaving({ get: useStore.getState, set, backend: () => backend, active, scope, say, beforeFlush, beforeLeave });
+  const save = localSaving({ get: useStore.getState, set, board: () => currentBoard(), backend: () => backend, active, scope, say, beforeFlush, beforeLeave });
   const edits = localEdits({ get: useStore.getState, set, checkpoint });
 
   /** The target of a board in this machine's store (see show): the boards folder, or this browser. */
@@ -1046,7 +1046,7 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
   async function beforeFlush(): Promise<void> {
     const current = scope();
     if (keeping) await keeping.catch(() => {});
-    if (current() && pushTimer !== undefined) await pushOut().catch(() => {});
+    while (current() && (pushTimer !== undefined || pushesInFlight)) await (pushTimer === undefined ? pushing : push());
   }
 
   /**
@@ -1079,24 +1079,30 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
     loading = request;
     const current = scope();
     const superseded = () => !current() || loading !== request;
+    let was = useStore.getState();
+    const stopFollowingEdits = useStore.subscribe(() => {
+      const now = useStore.getState();
+      if (!now.viewing && now.doc !== was.doc) was = now;
+    });
     try {
-      const left = await leave();
-      if (superseded()) return 'superseded';
-      if (!left) return 'stayed';
-      const beforeLoad = useStore.getState().doc;
-      const doc = await tryLoad(b, id);
-      if (superseded()) return 'superseded';
-      if (!doc) return 'unreadable';
-      const shown = useStore.getState();
-      if (target.local && !shown.viewing && shown.doc !== beforeLoad) {
+      for (;;) {
         const left = await leave();
         if (superseded()) return 'superseded';
         if (!left) return 'stayed';
+        const beforeLoad = currentBoard();
+        const doc = await tryLoad(b, id);
+        if (superseded()) return 'superseded';
+        if (!doc) return 'unreadable';
+        // Not for a board of a shared project: it changes as others edit it, which would start the load over and over.
+        const changedWhileLoading = target.local && currentBoard() !== beforeLoad;
+        if (changedWhileLoading) continue;
+        const now = useStore.getState();
+        target.edits.keepSteps({ ...was, view: now.viewing ? was.view : now.view });
+        show(doc);
+        return 'shown';
       }
-      target.edits.keepSteps(useStore.getState());
-      show(doc);
-      return 'shown';
     } finally {
+      stopFollowingEdits();
       if (loading === request) loading = undefined;
     }
   }
@@ -1234,15 +1240,28 @@ export function createEditSession(options: { page?: boolean; device?: DeviceStor
   }
 
   let pushTimer: number | undefined;
+  /** The writes of shared things, one after another: each reads the other boards as the one before left them. */
+  let pushing: Promise<void> = Promise.resolve();
+  let pushesInFlight = 0;
   function schedulePush(): void {
     clearTimeout(pushTimer);
-    pushTimer = window.setTimeout(() => void pushOut(), 800);
+    pushTimer = window.setTimeout(() => void push(), 800);
+  }
+
+  /** Write the shared things edited here through to the other boards, once those sent before are written. */
+  function push(): Promise<void> {
+    clearTimeout(pushTimer);
+    pushTimer = undefined;
+    pushesInFlight++;
+    pushing = pushing
+      .then(pushOut)
+      .catch((e) => console.warn('[keito] shared changes not written', e))
+      .finally(() => pushesInFlight--);
+    return pushing;
   }
 
   /** Write the shared things edited here through to the other boards of the project. */
   async function pushOut(): Promise<void> {
-    clearTimeout(pushTimer);
-    pushTimer = undefined;
     const b = backend;
     const s = useStore.getState();
     if (!b || s.viewing || !s.doc.meta.project?.trim()) return;
