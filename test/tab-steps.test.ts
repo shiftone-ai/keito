@@ -252,6 +252,23 @@ describe('a board edited while a state from the history waits for a shared edit 
   });
 });
 
+describe('a board edited while a state from the history loads', () => {
+  it('never writes the state over the board', async () => {
+    const { backend, box, state, wait, keepState } = await start('a', 'b');
+    const revision = await keepState();
+    vi.spyOn(backend, 'loadRevision').mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return { ...blank('a'), meta: { title: 'a state', project: 'P' } };
+    });
+    state().viewRevision(revision);
+    await wait(10);
+    state().updateNode('n1', { x: 9 });
+    await wait(2000);
+    expect(state().viewing).toBeTruthy();
+    expect(box.kept.get('a')?.doc.meta.title).toBe('a');
+  });
+});
+
 describe('a shared device edited while another board loads', () => {
   it('keeps the edit on every board when the next one is edited as soon as it is shown', async () => {
     const { box, state, click, wait, justShown } = await start('a', 'b');

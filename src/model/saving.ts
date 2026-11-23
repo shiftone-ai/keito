@@ -206,7 +206,7 @@ export function localSaving(host: SavingHost): LocalSaving {
     if (!s.ready || s.viewing || s.doc === prev.doc || s.doc === stored || s.saving === 'conflict' || s.saving === 'gone') return;
     clearTimeout(timer);
     if (s.saving !== 'saving') host.set({ saving: 'saving' });
-    timer = window.setTimeout(() => void persist(host.get().doc), 500);
+    timer = window.setTimeout(() => void persist(host.board()), 500);
   }
 
   function stop(): void {
