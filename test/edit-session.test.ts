@@ -372,7 +372,7 @@ describe('independent edit sessions', () => {
     expect(session.currentBoard()).toEqual(doc);
   });
 
-  it('does not finish an old project push after switching boards', async () => {
+  it('finishes the project push under way before switching boards', async () => {
     const { createEditSession } = await import('../src/model/store');
     const session = createEditSession();
     const node: DeviceNode = { id: 'pc', type: 'device', x: 0, y: 0, w: 160, h: 0, text: 'PC', maker: '', model: '', category: '', note: '', ports: [], shared: 'gear', sharedAt: 1 };
@@ -390,10 +390,10 @@ describe('independent edit sessions', () => {
       box.delay = 0;
       session.useStore.getState().openBoard('ccc');
       await vi.advanceTimersByTimeAsync(10);
-      expect(session.useStore.getState().doc.id).toBe('ccc');
+      expect(session.useStore.getState().doc.id).toBe('aaa');
       await vi.advanceTimersByTimeAsync(200);
       expect(session.useStore.getState().doc.meta.title).toBe('C');
-      expect(box.kept.get('bbb')?.doc.nodes[0].text).not.toBe('Changed in P');
+      expect(box.kept.get('bbb')?.doc.nodes[0].text).toBe('Changed in P');
     } finally {
       session.dispose();
     }
