@@ -5,6 +5,7 @@ valid:
   - "import { createHash } from 'node:crypto';"
   - "const docs = 'node:sqlite';"
   - "logger.info('node:fs');"
+  - "const module = await import(resolveModule('node:fs'));"
 invalid:
   - "import { DatabaseSync } from 'node:sqlite';"
   - |-
@@ -17,5 +18,7 @@ invalid:
   - "export * from 'fs';"
   - "import fs = require('node:fs');"
   - "const fs = require('fs/promises');"
+  - "const fs = module.require('node:fs');"
+  - "const fs = await import(('node:fs'));"
   - "const fs = await import(`node:fs`);"
   - "type Database = import('node:sqlite').DatabaseSync;"

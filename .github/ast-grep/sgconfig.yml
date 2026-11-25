@@ -6,3 +6,4 @@ testConfigs:
   - testDir: rule-tests
 languageGlobs:
   TypeScript: ['*.js', '*.mjs', '*.cjs']
+  Tsx: ['*.jsx']

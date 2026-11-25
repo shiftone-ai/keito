@@ -18,4 +18,5 @@ rule:
 utils:
   existing-sqlite-import:
     kind: import_statement
-    regex: "^import \\{ DatabaseSync \\} from 'node:sqlite';$"
+    regex: >-
+      ^import\s*\{\s*DatabaseSync\s*,?\s*\}\s*from\s*['"]node:sqlite['"]\s*;?$

@@ -15,6 +15,9 @@ rule:
               - kind: import_require_clause
         - inside:
             kind: arguments
+            stopBy:
+              not:
+                kind: parenthesized_expression
             inside:
               kind: call_expression
               has:
@@ -22,3 +25,4 @@ rule:
                 any:
                   - kind: import
                   - pattern: require
+                  - pattern: module.require

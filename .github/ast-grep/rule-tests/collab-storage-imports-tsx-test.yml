@@ -1,0 +1,7 @@
+id: collab-storage-imports-tsx
+valid:
+  - "const label = <span>node:fs</span>;"
+invalid:
+  - |-
+    import fs from 'node:fs';
+    const label = <span>{fs.existsSync('file')}</span>;

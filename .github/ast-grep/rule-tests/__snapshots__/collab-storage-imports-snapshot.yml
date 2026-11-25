@@ -1,11 +1,23 @@
 id: collab-storage-imports
 snapshots:
+  "const fs = await import(('node:fs'));":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 25
+      end: 34
   "const fs = await import(`node:fs`);":
     labels:
     - source: "`node:fs`"
       style: primary
       start: 24
       end: 33
+  "const fs = module.require('node:fs');":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 26
+      end: 35
   const fs = require('fs/promises');:
     labels:
     - source: "'fs/promises'"

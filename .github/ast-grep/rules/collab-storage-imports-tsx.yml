@@ -1,0 +1,32 @@
+id: collab-storage-imports-tsx
+language: Tsx
+severity: error
+message: Use a storage interface instead of importing filesystem or SQLite modules here.
+files:
+  - 'server/collab/**'
+rule:
+  all:
+    - any:
+        - kind: string
+        - kind: template_string
+      regex: ^['"`](?:(?:node:)?fs(?:/promises)?|node:sqlite)['"`]$
+    - any:
+        - inside:
+            field: source
+            any:
+              - kind: import_statement
+              - kind: export_statement
+              - kind: import_require_clause
+        - inside:
+            kind: arguments
+            stopBy:
+              not:
+                kind: parenthesized_expression
+            inside:
+              kind: call_expression
+              has:
+                field: function
+                any:
+                  - kind: import
+                  - pattern: require
+                  - pattern: module.require

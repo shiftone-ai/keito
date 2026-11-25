@@ -1,6 +1,10 @@
 id: collab-store-storage-imports
 valid:
   - "import { DatabaseSync } from 'node:sqlite';"
+  - |-
+    import {
+      DatabaseSync,
+    } from "node:sqlite"
 invalid:
   - |-
     import { DatabaseSync } from 'node:sqlite';
