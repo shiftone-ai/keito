@@ -6,6 +6,7 @@ valid:
   - "const docs = 'node:sqlite';"
   - "logger.info('node:fs');"
 invalid:
+  - "import { DatabaseSync } from 'node:sqlite';"
   - |-
     import {
       readFile,

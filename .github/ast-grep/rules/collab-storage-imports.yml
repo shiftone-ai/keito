@@ -9,27 +9,4 @@ ignores:
   - server/collab/diskPictures.ts
   - server/collab/store.ts
 rule:
-  all:
-    - matches: storage-module
-    - any:
-        - inside:
-            field: source
-            any:
-              - kind: import_statement
-              - kind: export_statement
-              - kind: import_require_clause
-        - inside:
-            kind: arguments
-            inside:
-              kind: call_expression
-              has:
-                field: function
-                any:
-                  - kind: import
-                  - pattern: require
-utils:
-  storage-module:
-    any:
-      - kind: string
-      - kind: template_string
-    regex: ^['"`](?:(?:node:)?fs(?:/promises)?|node:sqlite)['"`]$
+  matches: storage-import
