@@ -8,6 +8,8 @@ import type { Doc } from './types';
 export interface SavingHost {
   get(): State;
   set(change: Partial<State> | ((s: State) => Partial<State>)): void;
+  /** The board itself: the live one while an older state is on screen in its place. */
+  board(): Doc;
   /** The store, once connected. */
   backend(): Backend | null;
   /** Whether the session still runs. */
@@ -111,7 +113,7 @@ export function localSaving(host: SavingHost): LocalSaving {
       stored = doc;
       retries = 0;
       clearTimeout(retryTimer);
-      if (here()) host.set((s) => ({ saving: s.doc === doc ? 'saved' : 'saving', saveError: null }));
+      if (here()) host.set({ saving: host.board() === doc ? 'saved' : 'saving', saveError: null });
     } catch (e) {
       if (!here()) return console.error(e);
       // Written or deleted elsewhere since it was read here: the user settles it (see resolveConflict).
@@ -152,13 +154,16 @@ export function localSaving(host: SavingHost): LocalSaving {
   /**
    * Its state kept in its history, the board on screen may be left once its changes are written, or
    * the user lets go of those that cannot be (changed or deleted elsewhere, or the store unreachable).
+   * This includes edits made while a write is under way.
    */
   async function leave(): Promise<boolean> {
     const current = host.scope();
     await host.beforeLeave();
     if (!current()) return false;
-    if (await flush()) return true;
-    if (!current()) return false;
+    do {
+      if (await flush()) return true;
+      if (!current()) return false;
+    } while (host.get().saving === 'saving');
     const saving = host.get().saving;
     if (saving === 'conflict') {
       await tell('このボードはほかの場所で更新されています。先に上の「読み込む」か「この画面で上書き」を選んでください。');
@@ -201,7 +206,7 @@ export function localSaving(host: SavingHost): LocalSaving {
     if (!s.ready || s.viewing || s.doc === prev.doc || s.doc === stored || s.saving === 'conflict' || s.saving === 'gone') return;
     clearTimeout(timer);
     if (s.saving !== 'saving') host.set({ saving: 'saving' });
-    timer = window.setTimeout(() => void persist(host.get().doc), 500);
+    timer = window.setTimeout(() => void persist(host.board()), 500);
   }
 
   function stop(): void {

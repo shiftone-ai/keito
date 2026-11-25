@@ -99,6 +99,84 @@ test('two browsers type into one name at once, at different places, with a paste
   await expect(textField(c)).toHaveValue('C貼り\nA図X\nB');
 });
 
+test('a shape fits both browsers’ lines before either finishes editing', async ({ browser }) => {
+  const a = await openLink(browser);
+  const b = await openLink(browser);
+  await edit(a);
+  await edit(b);
+  const { port } = server;
+  await server.kill();
+  for (const page of [a, b]) await expect(page.locator('.save-state')).toContainText('オフライン');
+
+  await a.keyboard.press('ArrowLeft');
+  await a.keyboard.type('A1');
+  await a.keyboard.press('Enter');
+  await a.keyboard.type('A2');
+  await a.keyboard.press('Enter');
+  await b.keyboard.press('ArrowRight');
+  await b.keyboard.press('Enter');
+  await b.keyboard.type('B1');
+  await b.keyboard.press('Enter');
+  await b.keyboard.type('B2');
+  for (const page of [a, b]) await expect(shape(page)).toHaveAttribute('height', '90');
+
+  server = await startServer(data, port);
+  for (const page of [a, b]) {
+    await expect.poll(() => shown(page), { timeout: 30_000 }).toBe('A1\nA2\n図形\nB1\nB2');
+    await expect(editor(page)).toBeFocused();
+    await expect(shape(page), 'the shape fits all five lines while editing').toHaveAttribute('height', '120');
+  }
+  for (const page of [a, b]) {
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect(editor(page)).toHaveCount(0);
+    await expect(shape(page)).toHaveAttribute('height', '120');
+  }
+
+  await a.keyboard.press('ControlOrMeta+z');
+  for (const page of [a, b]) {
+    await expect(textField(page)).toHaveValue('図形\nB1\nB2');
+    expect(Number(await shape(page).getAttribute('height'))).toBeGreaterThanOrEqual(90);
+  }
+});
+
+test('an emptied text box stays for the other browser and goes when the last editor leaves it empty', async ({ browser }) => {
+  const a = await openLink(browser);
+  const b = await openLink(browser);
+  const box = (page: Page) => page.locator('#canvas rect[fill="none"][pointer-events="all"]');
+  const peerTyping = (page: Page) => page.locator('#canvas .peer-tag.editing');
+
+  await a.getByRole('button', { name: 'テキスト', exact: true }).click();
+  const area = (await a.locator('#canvas').boundingBox())!;
+  await a.mouse.click(area.x + area.width / 2 + 200, area.y + area.height / 2 + 120);
+  await expect(editor(a)).toBeFocused();
+  await a.keyboard.type('Original');
+  await a.keyboard.press('ControlOrMeta+Enter');
+  await expect(b.locator('#canvas').getByText('Original', { exact: true })).toBeVisible();
+
+  await reopen(a);
+  const at = (await box(b).boundingBox())!;
+  await b.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+  await reopen(b);
+  for (const page of [a, b]) await expect(peerTyping(page)).toHaveCount(1);
+
+  await a.keyboard.press('Backspace');
+  await expect.poll(() => shown(b)).toBe('');
+  await a.keyboard.press('ControlOrMeta+Enter');
+  await expect(editor(a)).toHaveCount(0);
+  await expect(box(a), 'the empty text box is kept while the peer edits it').toHaveCount(1);
+  await expect(editor(b)).toBeFocused();
+  await expect(peerTyping(b)).toHaveCount(0);
+
+  await b.keyboard.type('xyz');
+  await b.keyboard.press('ControlOrMeta+Enter');
+  for (const page of [a, b]) await expect(page.locator('#canvas').getByText('xyz', { exact: true })).toBeVisible();
+
+  await reopen(b);
+  await b.keyboard.press('Backspace');
+  await b.keyboard.press('ControlOrMeta+Enter');
+  for (const page of [a, b]) await expect(box(page)).toHaveCount(0);
+});
+
 test('each browser undoes only its own typing, Escape calling off only its own, and undo while typing takes back what it typed', async ({ browser }) => {
   const a = await openLink(browser);
   const b = await openLink(browser);

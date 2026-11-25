@@ -2,6 +2,7 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 import type { BoardKind } from '../model/kinds';
 import type { Doc } from '../model/types';
+import { boardPictureNames } from './boardPictures';
 import { type SharedBoardInfo, addBoard, boardLines, boardList, boardNodes, deleteBoard, deletedBoardList, renameBoard, restoreBoard } from './boards';
 import { type DeviceLink, linkedTo, shareKey, sharedDevices, writeLink } from './devices';
 import type { BoardEdit } from './edits';
@@ -151,6 +152,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       settle.resolve();
       sendAll();
       copy.changed();
+      if (status.role === 'editor') pictures.resumeAfterSync();
       notify();
     },
     onAuthenticationFailed: ({ reason }) => refuse(reason),
@@ -243,6 +245,7 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       send(op, update);
     }
     if (joined && origin !== fromDevice) copy.changed();
+    pictures.usedByBoards(boardPictureNames(ydoc));
     notify();
   });
 
@@ -280,6 +283,9 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       write();
     }, drawing);
 
+  /** A drawing edit that is sent as usual, with no board marked for undo (see tracked). */
+  const outsideHistory = (write: () => void): void => ydoc.transact(write, drawing);
+
   void start();
 
   return {
@@ -308,12 +314,14 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
       listeners.add(hear);
       return () => void listeners.delete(hear);
     },
-    /** Make an edit of a board: one commit confirmed once stored, and a step to undo of its own or, `joins`, part of this client's last. */
-    edit(board: string, edit: BoardEdit, joins = false): void {
+    /** Make an edit of a board, confirmed once stored. Its undo step is new, joined to the last, or skipped. */
+    edit(board: string, edit: BoardEdit, undo: 'new' | 'join' | 'skip' = 'new'): void {
       const at = editing() ? tracked(board) : null;
       if (!at) return;
-      if (!joins) at.history.stopCapturing();
-      names.edit(joins, () => draw(board, () => writeEdit(at, edit)));
+      if (undo === 'new') at.history.stopCapturing();
+      const write = () => writeEdit(at, edit);
+      if (undo === 'skip') names.edit(false, () => outsideHistory(write));
+      else names.edit(undo === 'join', () => draw(board, write));
     },
     /**
      * Link a device of a board to the project's shared devices, or unlink it, or delete a shared
@@ -354,8 +362,6 @@ export function joinProject(join: SharedJoin, device: DeviceStore | null = null,
      */
     typeInto(board: string, at: TextAt, joins: boolean): TextSession | null {
       const parts = editing() ? tracked(board) : null;
-      // Not through `draw`: unmarked by a board (see tracked), a change is in no board's history.
-      const outsideHistory = (write: () => void): void => ydoc.transact(write, drawing);
       const session = parts && typeIntoBoard(ydoc, board, at, { origin: drawing, transact: (write) => draw(board, write), outsideHistory, history: parts.history, joins, editing });
       return session && names.typing(session);
     },
