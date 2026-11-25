@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "check:collab-imports": "ast-grep test --config .github/ast-grep/sgconfig.yml && ast-grep scan --config .github/ast-grep/sgconfig.yml server/collab",
     "keito": "tsx cli/keito.ts",
     "collab": "tsx server/collab/cli.ts",
     "test": "vitest run",
@@ -35,6 +36,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.51.3",
     "@playwright/test": "1.64.1",
     "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^22.20.5",

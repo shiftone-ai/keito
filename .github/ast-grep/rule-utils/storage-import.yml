@@ -1,0 +1,28 @@
+id: storage-import
+language: TypeScript
+rule:
+  all:
+    - any:
+        - kind: string
+        - kind: template_string
+      regex: ^['"`](?:(?:node:)?fs(?:/promises)?|node:sqlite)['"`]$
+    - any:
+        - inside:
+            field: source
+            any:
+              - kind: import_statement
+              - kind: export_statement
+              - kind: import_require_clause
+        - inside:
+            kind: arguments
+            stopBy:
+              not:
+                kind: parenthesized_expression
+            inside:
+              kind: call_expression
+              has:
+                field: function
+                any:
+                  - kind: import
+                  - pattern: require
+                  - pattern: module.require

@@ -1,0 +1,12 @@
+id: collab-storage-imports-tsx
+snapshots:
+  "import fs from 'node:fs';\nconst label = <span>{fs.existsSync('file')}</span>;":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 15
+      end: 24
+    - source: import fs from 'node:fs';
+      style: secondary
+      start: 0
+      end: 25

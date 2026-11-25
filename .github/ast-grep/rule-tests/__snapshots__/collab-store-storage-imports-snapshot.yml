@@ -1,0 +1,26 @@
+id: collab-store-storage-imports
+snapshots:
+  "import { DatabaseSync as Database } from 'node:sqlite';":
+    labels:
+    - source: "'node:sqlite'"
+      style: primary
+      start: 41
+      end: 54
+  "import { DatabaseSync } from 'node:sqlite';\nimport { DatabaseSync } from 'node:sqlite';":
+    labels:
+    - source: "'node:sqlite'"
+      style: primary
+      start: 73
+      end: 86
+  "import { DatabaseSync } from 'node:sqlite';\nimport { readFile } from 'node:fs/promises';":
+    labels:
+    - source: "'node:fs/promises'"
+      style: primary
+      start: 69
+      end: 87
+  "import { DatabaseSync } from 'node:sqlite'; import 'node:sqlite';":
+    labels:
+    - source: "'node:sqlite'"
+      style: primary
+      start: 51
+      end: 64

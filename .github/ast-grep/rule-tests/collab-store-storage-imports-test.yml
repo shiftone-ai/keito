@@ -1,0 +1,16 @@
+id: collab-store-storage-imports
+valid:
+  - "import { DatabaseSync } from 'node:sqlite';"
+  - |-
+    import {
+      DatabaseSync,
+    } from "node:sqlite"
+invalid:
+  - |-
+    import { DatabaseSync } from 'node:sqlite';
+    import { readFile } from 'node:fs/promises';
+  - "import { DatabaseSync } from 'node:sqlite'; import 'node:sqlite';"
+  - |-
+    import { DatabaseSync } from 'node:sqlite';
+    import { DatabaseSync } from 'node:sqlite';
+  - "import { DatabaseSync as Database } from 'node:sqlite';"

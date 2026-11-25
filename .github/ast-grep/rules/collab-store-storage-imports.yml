@@ -1,0 +1,22 @@
+id: collab-store-storage-imports
+language: TypeScript
+severity: error
+message: Use a storage interface instead of importing filesystem or SQLite modules here.
+url: https://github.com/shiftone-ai/keito/issues/80
+files:
+  - server/collab/store.ts
+rule:
+  matches: storage-import
+  not:
+    inside:
+      field: source
+      matches: existing-sqlite-import
+      not:
+        follows:
+          matches: existing-sqlite-import
+          stopBy: end
+utils:
+  existing-sqlite-import:
+    kind: import_statement
+    regex: >-
+      ^import\s*\{\s*DatabaseSync\s*,?\s*\}\s*from\s*['"]node:sqlite['"]\s*;?$

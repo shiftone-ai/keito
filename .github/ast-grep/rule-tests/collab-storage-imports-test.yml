@@ -1,0 +1,24 @@
+id: collab-storage-imports
+valid:
+  - "import { PictureEngine } from './pictureStore';"
+  - "import * as fs from './fs';"
+  - "import { createHash } from 'node:crypto';"
+  - "const docs = 'node:sqlite';"
+  - "logger.info('node:fs');"
+  - "const module = await import(resolveModule('node:fs'));"
+invalid:
+  - "import { DatabaseSync } from 'node:sqlite';"
+  - |-
+    import {
+      readFile,
+    } from 'node:fs/promises';
+  - 'import "node:sqlite";'
+  - "import type { Stats } from 'node:fs';"
+  - "export { readFile } from 'node:fs/promises';"
+  - "export * from 'fs';"
+  - "import fs = require('node:fs');"
+  - "const fs = require('fs/promises');"
+  - "const fs = module.require('node:fs');"
+  - "const fs = await import(('node:fs'));"
+  - "const fs = await import(`node:fs`);"
+  - "type Database = import('node:sqlite').DatabaseSync;"

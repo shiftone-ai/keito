@@ -1,0 +1,74 @@
+id: collab-storage-imports
+snapshots:
+  "const fs = await import(('node:fs'));":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 25
+      end: 34
+  "const fs = await import(`node:fs`);":
+    labels:
+    - source: "`node:fs`"
+      style: primary
+      start: 24
+      end: 33
+  "const fs = module.require('node:fs');":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 26
+      end: 35
+  const fs = require('fs/promises');:
+    labels:
+    - source: "'fs/promises'"
+      style: primary
+      start: 19
+      end: 32
+  export * from 'fs';:
+    labels:
+    - source: "'fs'"
+      style: primary
+      start: 14
+      end: 18
+  "export { readFile } from 'node:fs/promises';":
+    labels:
+    - source: "'node:fs/promises'"
+      style: primary
+      start: 25
+      end: 43
+  "import \"node:sqlite\";":
+    labels:
+    - source: "\"node:sqlite\""
+      style: primary
+      start: 7
+      end: 20
+  "import fs = require('node:fs');":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 20
+      end: 29
+  "import type { Stats } from 'node:fs';":
+    labels:
+    - source: "'node:fs'"
+      style: primary
+      start: 27
+      end: 36
+  "import {\n  readFile,\n} from 'node:fs/promises';":
+    labels:
+    - source: "'node:fs/promises'"
+      style: primary
+      start: 28
+      end: 46
+  "import { DatabaseSync } from 'node:sqlite';":
+    labels:
+    - source: "'node:sqlite'"
+      style: primary
+      start: 29
+      end: 42
+  "type Database = import('node:sqlite').DatabaseSync;":
+    labels:
+    - source: "'node:sqlite'"
+      style: primary
+      start: 23
+      end: 36
